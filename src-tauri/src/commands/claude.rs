@@ -385,7 +385,65 @@ async fn native_access_token(p: &ClaudeProfile, force: bool) -> Result<String> {
         .context("Claude subscription login unavailable")
 }
 
-async fn fetch_usage(p: &ClaudeProfile) -> Result<ClaudeUsage> {
+const USAGE_RATE_LIMITED: &str = "Claude usage checks are temporarily rate limited (HTTP 429). Automatic retry is pending; signing in again is not required.";
+
+#[derive(Default, Serialize, Deserialize)]
+struct UsageProbe {
+    #[serde(default)]
+    retry_at: i64,
+    #[serde(default)]
+    usage: Option<ClaudeUsage>,
+}
+
+impl UsageProbe {
+    fn cached(&self, now: i64, after_warmup: bool) -> Result<Option<ClaudeUsage>> {
+        if self.retry_at > now {
+            bail!(USAGE_RATE_LIMITED);
+        }
+        if after_warmup {
+            return Ok(None);
+        }
+        Ok(self
+            .usage
+            .clone()
+            .filter(|u| (0..45).contains(&(now - u.checked_at))))
+    }
+}
+
+fn usage_retry_delay(value: Option<&str>, now: i64) -> i64 {
+    value
+        .and_then(|v| {
+            v.parse::<i64>().ok().or_else(|| {
+                chrono::DateTime::parse_from_rfc2822(v)
+                    .ok()
+                    .map(|date| date.timestamp() - now)
+            })
+        })
+        .unwrap_or(300)
+        .clamp(1, 86400)
+}
+
+async fn fetch_usage(p: &ClaudeProfile, after_warmup: bool) -> Result<ClaudeUsage> {
+    let directory = root()?.join(&p.id);
+    private_dir(&directory)?;
+    let probe_path = directory.join("usage-probe.json");
+    // Share throttling across the UI, warm-up and managed terminal processes.
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(directory.join("usage-probe.lock"))?;
+    lock.try_lock()
+        .map_err(|_| anyhow::anyhow!("Claude usage is already being checked"))?;
+    let probe: UsageProbe = match fs::read(&probe_path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => UsageProbe::default(),
+        Err(error) => return Err(error.into()),
+    };
+    if let Some(usage) = probe.cached(chrono::Utc::now().timestamp(), after_warmup)? {
+        return Ok(usage);
+    }
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()?;
@@ -401,13 +459,42 @@ async fn fetch_usage(p: &ClaudeProfile) -> Result<ClaudeUsage> {
         if response.status() == reqwest::StatusCode::UNAUTHORIZED && !force {
             continue;
         }
+        if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let now = chrono::Utc::now().timestamp();
+            let delay = usage_retry_delay(
+                response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|value| value.to_str().ok()),
+                now,
+            );
+            write_json(
+                &probe_path,
+                &UsageProbe {
+                    retry_at: now + delay,
+                    usage: None,
+                },
+            )?;
+            bail!(USAGE_RATE_LIMITED);
+        }
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            bail!("Claude subscription login is unavailable; sign in again");
+        }
         if !response.status().is_success() {
             bail!(
-                "Claude usage returned HTTP {}; refresh the native login",
+                "Claude usage check failed (HTTP {})",
                 response.status().as_u16()
             );
         }
-        return parse_usage(&response.json::<Value>().await?);
+        let usage = parse_usage(&response.json::<Value>().await?)?;
+        write_json(
+            &probe_path,
+            &UsageProbe {
+                retry_at: 0,
+                usage: Some(usage.clone()),
+            },
+        )?;
+        return Ok(usage);
     }
     bail!("Claude usage could not be verified")
 }
@@ -580,7 +667,7 @@ pub async fn refresh_claude_profiles() -> Result<ClaudeProfiles, String> {
         p.usage = None;
         p.error = None;
         if p.logged_in {
-            match fetch_usage(&p).await {
+            match fetch_usage(&p, false).await {
                 Ok(usage) => p.usage = Some(usage),
                 Err(e) => p.error = Some(e.to_string()),
             }
@@ -944,7 +1031,7 @@ async fn warmup_native(p: &ClaudeProfile) -> Result<()> {
     {
         bail!("Sign in to this Claude account first");
     }
-    let usage = fetch_usage(p).await?;
+    let usage = fetch_usage(p, false).await?;
     let mut verified = p.clone();
     verified.logged_in = true;
     verified.plan_type = verified_plan(&status);
@@ -976,13 +1063,14 @@ async fn warmup_native(p: &ClaudeProfile) -> Result<()> {
     {
         bail!("Claude warm-up was not confirmed");
     }
-    let fresh = fetch_usage(p).await.ok();
+    let fresh = fetch_usage(p, true).await;
+    let error = fresh.as_ref().err().map(ToString::to_string);
     let _lock = lock_store()?;
     let mut store = load()?;
     if let Some(saved) = store.profiles.iter_mut().find(|saved| saved.id == p.id) {
         saved.last_warmup_at = Some(chrono::Utc::now().timestamp());
-        saved.usage = fresh;
-        saved.error = None;
+        saved.usage = fresh.ok();
+        saved.error = error;
     }
     save(&store)?;
     Ok(())
@@ -1520,6 +1608,44 @@ pub async fn switch_claude_desktop(profile_id: String) -> Result<ClaudeProfiles,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_probe_honors_shared_cooldown_and_freshness() {
+        let usage =
+            parse_usage(&json!({"five_hour":{"utilization":10},"seven_day":{"utilization":20}}))
+                .unwrap();
+        let now = usage.checked_at;
+        let probe = UsageProbe {
+            retry_at: now + 300,
+            usage: Some(usage.clone()),
+        };
+        let saved: UsageProbe =
+            serde_json::from_slice(&serde_json::to_vec(&probe).unwrap()).unwrap();
+        assert!(saved
+            .cached(now, false)
+            .unwrap_err()
+            .to_string()
+            .contains("HTTP 429"));
+        assert!(saved.cached(now, true).is_err());
+        assert!(saved.cached(now + 300, false).unwrap().is_none());
+        let probe = UsageProbe {
+            retry_at: 0,
+            usage: Some(usage),
+        };
+        assert!(probe.cached(now, true).unwrap().is_none());
+        assert!(probe.cached(now + 44, false).unwrap().is_some());
+        assert!(probe.cached(now + 45, false).unwrap().is_none());
+        assert!(probe.cached(now - 1, false).unwrap().is_none());
+        assert_eq!(usage_retry_delay(None, now), 300);
+        assert_eq!(usage_retry_delay(Some("120"), now), 120);
+        assert_eq!(usage_retry_delay(Some("invalid"), now), 300);
+        assert_eq!(usage_retry_delay(Some("-1"), now), 1);
+        assert_eq!(usage_retry_delay(Some("999999"), now), 86400);
+        assert_eq!(
+            usage_retry_delay(Some("Wed, 21 Oct 2015 07:28:00 GMT"), 1445412420),
+            60
+        );
+    }
 
     #[test]
     fn pasted_login_return_is_bound_to_the_current_flow() {

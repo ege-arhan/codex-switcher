@@ -50,3 +50,10 @@ test("native recovery messages translate without rewriting account or prompt val
   assert.equal(localizeProductMessage("Switched to account 'A' and resumed session in-place with 'continue'", tr), "'A' hesabına geçildi ve mevcut oturuma 'continue' mesajıyla devam edildi");
   assert.equal(localizeProductMessage("OS error: EACCES /secret/path", tr), "OS error: EACCES /secret/path");
 });
+
+test("Claude usage throttling is localized without asking for reauthentication", () => {
+  const source = "Claude usage checks are temporarily rate limited (HTTP 429). Automatic retry is pending; signing in again is not required.";
+  const tr = (source: string, params?: Record<string, string | number>) => translate(source, "tr", dictionary, params);
+  assert.match(localizeProductMessage(source, tr), /yeniden giriş yapman gerekmiyor/);
+  assert.equal(localizeProductMessage("Claude usage check failed (HTTP 503)", tr), "Claude kullanımı kontrol edilemedi (HTTP 503)");
+});

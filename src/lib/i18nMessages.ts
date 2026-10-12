@@ -8,6 +8,7 @@ export function localizeProductMessage(message: string, t: (source: string, para
     [/^Auto-redeemed reset credit on active account '(.*)' \(limits refreshed\). (Resumed session in-place|Relaunched session) with '(.*)'\.$/, m => t(m[2] === "Resumed session in-place" ? "Auto-redeemed reset credit on active account '{name}' (limits refreshed). Resumed session in-place with '{phrase}'." : "Auto-redeemed reset credit on active account '{name}' (limits refreshed). Relaunched session with '{phrase}'.", { name: m[1], phrase: m[3] })],
     [/^Server overloaded\. Sent automatic retry \(attempt (\d+)\/(\d+)\) with '(.*)'$/, m => t("Server overloaded. Sent automatic retry (attempt {attempt}/{max}) with '{phrase}'", { attempt: m[1], max: m[2], phrase: m[3] })],
     [/^Automatic recovery failed: (.*)$/s, m => t("Automatic recovery failed: {error}", { error: m[1] })],
+    [/^Claude usage check failed \(HTTP (\d+)\)$/, m => t("Claude usage check failed (HTTP {status})", { status: m[1] })],
   ];
   for (const [pattern, format] of patterns) { const match = message.match(pattern); if (match) return format(match); }
   return t(message);
