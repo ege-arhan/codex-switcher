@@ -33,6 +33,8 @@ pub struct ClaudeProfile {
     #[serde(default)]
     pub account_uuid: Option<String>,
     #[serde(default)]
+    pub desktop_status: String,
+    #[serde(default)]
     pub logged_in: bool,
     #[serde(default)]
     pub usage: Option<ClaudeUsage>,
@@ -414,7 +416,37 @@ fn eligible(p: &ClaudeProfile, tried: &HashSet<String>, now: i64) -> bool {
 
 #[tauri::command]
 pub async fn list_claude_profiles() -> Result<ClaudeProfiles, String> {
-    load().map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(|| {
+        let mut store = load()?;
+        let Ok((live, backups)) = desktop_paths() else {
+            for p in &mut store.profiles {
+                p.desktop_status = "unavailable".into();
+            }
+            return Ok::<_, anyhow::Error>(store);
+        };
+        for p in &mut store.profiles {
+            if uuid::Uuid::parse_str(&p.id).is_err() {
+                p.desktop_status = "unavailable".into();
+                continue;
+            }
+            p.account_uuid = code_account_uuid(p).or_else(|| p.account_uuid.clone());
+            let path = if store.active_desktop_id.as_deref() == Some(&p.id) {
+                live.clone()
+            } else {
+                backups.join(&p.id)
+            };
+            p.desktop_status = match account_uuid(&path.join("config.json")) {
+                None => "login_required",
+                Some(identity) if Some(identity.as_str()) == p.account_uuid.as_deref() => "saved",
+                _ => "different_account",
+            }
+            .into();
+        }
+        Ok::<_, anyhow::Error>(store)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
 }
 
 fn account_uuid(path: &Path) -> Option<String> {
@@ -440,9 +472,16 @@ fn identify_live_desktop(store: &mut ClaudeProfiles, live: &Path) -> Result<()> 
         p.account_uuid = code_account_uuid(p).or_else(|| p.account_uuid.clone());
     }
     if let Some(identity) = account_uuid(&live.join("config.json")) {
-        let matched = store.profiles.iter().find(|p| p.account_uuid.as_deref() == Some(&identity))
-            .context("Add the account currently signed in to Claude Desktop before switching its profile")?;
-        store.active_desktop_id = Some(matched.id.clone());
+        if let Some(selected) = store.active_desktop_id.as_deref() {
+            let expected = profile(store, selected)?;
+            if expected.account_uuid.as_deref() != Some(identity.as_str()) {
+                bail!("Bu Desktop profilinde başka bir hesap açık. Claude’dan çıkış yapıp {} ile giriş yap; kayıtlı profiller korundu", expected.email);
+            }
+        } else {
+            let matched = store.profiles.iter().find(|p| p.account_uuid.as_deref() == Some(&identity))
+                .context("Add the account currently signed in to Claude Desktop before switching its profile")?;
+            store.active_desktop_id = Some(matched.id.clone());
+        }
     }
     Ok(())
 }
@@ -455,6 +494,7 @@ pub async fn import_current_claude_profile() -> Result<ClaudeProfiles, String> {
             email: String::new(),
             is_default: true,
             account_uuid: None,
+            desktop_status: String::new(),
             logged_in: false,
             usage: None,
             error: None,
@@ -588,6 +628,7 @@ async fn start_login_process(email: String) -> Result<ClaudeLogin> {
                 email,
                 is_default: false,
                 account_uuid: None,
+                desktop_status: String::new(),
                 logged_in: false,
                 usage: None,
                 error: None,
@@ -708,9 +749,16 @@ fn quote(s: &str) -> String {
 }
 
 #[tauri::command]
-pub async fn open_claude_code(profile_id: String, cwd: String) -> Result<ClaudeProfiles, String> {
+pub async fn open_claude_code(
+    profile_id: String,
+    cwd: Option<String>,
+) -> Result<ClaudeProfiles, String> {
     tokio::task::spawn_blocking(move || -> Result<ClaudeProfiles> {
-        if !Path::new(&cwd).is_dir() {
+        let cwd = cwd
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or(home()?);
+        if !cwd.is_dir() {
             bail!("Choose an existing project directory");
         }
         let _lock = lock_store()?;
@@ -723,7 +771,7 @@ pub async fn open_claude_code(profile_id: String, cwd: String) -> Result<ClaudeP
             "{} --claude-run {} {}",
             quote(&std::env::current_exe()?.to_string_lossy()),
             quote(&profile_id),
-            quote(&cwd)
+            quote(&cwd.to_string_lossy())
         );
         #[cfg(target_os = "macos")]
         {
@@ -1038,8 +1086,12 @@ pub async fn switch_claude_desktop(profile_id: String) -> Result<ClaudeProfiles,
         let (live, backups) = desktop_paths()?;
         let journal = root()?.join("desktop-transaction.json");
         if store.active_desktop_id.as_deref() == Some(&profile_id) && !journal.exists() {
+            identify_live_desktop(&mut store, &live)?;
             Command::new("open").args(["-a", "Claude"]).status()?;
             return Ok(store);
+        }
+        if !journal.exists() {
+            identify_live_desktop(&mut store, &live)?;
         }
         // Quit through the app so it can flush Cookies/LevelDB; never force-kill it.
         if desktop_running()?
@@ -1125,6 +1177,7 @@ mod tests {
             email: "b@example.com".into(),
             is_default: false,
             account_uuid: None,
+            desktop_status: String::new(),
             logged_in: true,
             error: None,
             usage: Some(
@@ -1184,6 +1237,7 @@ mod tests {
             email: "test@example.com".into(),
             is_default: false,
             account_uuid: Some("account-b".into()),
+            desktop_status: String::new(),
             logged_in: true,
             usage: None,
             error: None,
@@ -1205,6 +1259,7 @@ mod tests {
         )
         .unwrap();
         assert!(identify_live_desktop(&mut store, &dir).is_err());
+        assert_eq!(store.active_desktop_id.as_deref(), Some(p.id.as_str()));
         fs::remove_dir_all(dir).unwrap();
     }
 

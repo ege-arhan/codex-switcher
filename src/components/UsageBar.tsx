@@ -36,16 +36,18 @@ function formatWindowDuration(minutes: number | null | undefined): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
-function RateLimitBar({
+export function RateLimitBar({
   label,
   usedPercent,
   windowMinutes,
   resetsAt,
+  tone,
 }: {
   label: string;
   usedPercent: number;
   windowMinutes?: number | null;
   resetsAt?: number | null;
+  tone?: "claude";
 }) {
   // Calculate remaining percentage
   const remainingPercent = Math.max(0, 100 - usedPercent);
@@ -56,7 +58,7 @@ function RateLimitBar({
       ? "bg-red-500"
       : remainingPercent <= 30
         ? "bg-amber-500"
-        : "bg-emerald-500";
+        : tone === "claude" ? "bg-[#d97757]" : "bg-emerald-500";
 
   const windowLabel = formatWindowDuration(windowMinutes);
   const resetLabel = formatResetTime(resetsAt);
@@ -72,7 +74,9 @@ function RateLimitBar({
           {resetLabel && exactResetLabel && ` (${exactResetLabel})`}
         </span>
       </div>
-      <div className="h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+      <div role="progressbar" aria-label={windowLabel ? `${windowLabel} remaining` : label}
+        aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(remainingPercent, 100)}
+        className="h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
         <div
           className={`h-full transition-all duration-300 ${colorClass}`}
           style={{ width: `${Math.min(remainingPercent, 100)}%` }}

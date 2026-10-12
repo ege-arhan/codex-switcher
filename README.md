@@ -165,12 +165,14 @@ not supported by this feature yet.
 ## Claude accounts (macOS)
 
 The **Claude hesapları** section imports the current Claude Code subscription
-with **Mevcut hesabı ekle**. **Add account** starts the installed Claude CLI's
+with **Mevcut hesabı ekle**. **Hesap ekle** starts the installed Claude CLI's
 native login in a separate `CLAUDE_CONFIG_DIR` and displays its sign-in link.
 Complete the login with the requested email. Switcher stores profile metadata;
 Claude owns the credentials in Keychain or its private credential file.
 
-**Claude Code aç** selects a project and opens a managed terminal. With
+**Claude Code aç** opens a managed terminal immediately in your home directory.
+**Proje klasörü seç** optionally selects and remembers a project directory;
+**Ana klasör** clears that choice. With
 **Claude Code auto-switch** enabled, a native `StopFailure` rate-limit hook
 checks the saved accounts' current usage and resumes the same local session
 in that terminal with an available account. Five-hour, weekly and reported
@@ -183,6 +185,10 @@ projects, settings and skills are shared; logins remain separate. Ordinary
 profile between account directories, preserving the outgoing profile without
 copying its contents. A journal supports recovery after an interrupted move.
 Sign in separately in Desktop when opening a new profile for the first time.
+The Code login success screen offers explicit terminal and Desktop actions;
+completing a Code authorization link alone does not open or sign into Desktop.
+Cards show separate Code and Desktop profile states. Desktop state describes
+the cached account identity, not a guarantee that its session is still valid.
 Native Desktop account identity is matched to the imported Code accounts before
 moving a profile. If Desktop is signed into another account, import that account
 first. Normal cloud chats stay with their original account;
