@@ -180,11 +180,11 @@ components:
 
 Identity, verified remaining quota and the next action establish the hierarchy. The default macOS presentation uses quiet surfaces and system typography, with compact controls and aligned account rows. This is an operational desktop utility inside Tauri, with a React interface.
 
-Windows XP, Windows 7, Terminal, Paper, Nord and Mono are alternate presentations of the same controls. Theme selection changes the neutral ramp, accent, font and geometry together. It does not change account behavior. The user's explicit familiar OS direction permits system fonts and authentic period chrome.
+Windows XP, Windows 7, Terminal, Paper, Nord and Mono are alternate presentations of the same controls. Theme selection changes the neutral ramp, accent, font and geometry together. A separate color-mode control selects light or dark for every identity. It does not change account behavior. The user's explicit familiar OS direction permits system fonts and authentic period chrome.
 
 **Key Characteristics:**
 - Identity before actions; remaining quota before advanced detail.
-- Seven coordinated themes with a shared component structure.
+- Seven theme identities, each available in light and dark mode, with a shared component structure.
 - Provider accents and labeled status remain independent of theme accents.
 - Turkish and English labels, wrapping actions and tabular account numerals.
 
@@ -202,9 +202,11 @@ Codex green marks active account borders and healthy remaining quota. Claude ter
 
 ### Neutral
 
-The numbered ramp is the shared foundation. Light themes use 50 for the shell, the surface for cards, 200/300 for divisions and borders, 900 for identity, and 500/600 for support copy. Terminal and Nord select dark mode: the shell uses 950, cards use 900, borders use 700, identity uses 100, and support text uses 400/300. The sidecar retains the existing ramp values; no synthetic palette is a runtime token. Some legacy menus still use explicit black or Tailwind neutral utilities; these are implementation exceptions, not an additional palette family.
+The numbered ramp is the shared foundation. Light themes use 50 for the shell, the surface for cards, 200/300 for divisions and borders, 900 for identity, and 500/600 for support copy. All seven identities support dark mode: the shell uses 950, cards use 900, borders use 700, identity uses 100, and support text uses 400/300. The sidecar retains the existing ramp values; no synthetic palette is a runtime token. Some legacy menus still use explicit black or Tailwind neutral utilities; these are implementation exceptions, not an additional palette family.
 
-**The Theme Together Rule.** Apply the selected neutral ramp, font, radii and accent as one presentation; Terminal and Nord also select dark mode.
+**The Theme Together Rule.** Apply the selected neutral ramp, font, radii and accent as one presentation. Light/dark controls the surface roles without replacing the theme identity, font or geometry. Dark XP and Aero retain period chrome with adjusted supporting-text contrast; light Terminal uses pale phosphor paper and dark ink; light Nord uses cool pale surfaces and a darker blue accent.
+
+New installations default to macOS light. Existing plain theme IDs retain their historical modes (Terminal and Nord dark; the other five light), and legacy `light`/`dark` values remain supported. Explicit selections persist as `theme:light` or `theme:dark` strings and synchronize to the tray. Selecting a different identity retains the chosen color mode.
 
 **The Provider and State Rule.** Keep provider identity distinct from quota warning and error states; accompany status color with a label or numerical value.
 
@@ -228,11 +230,11 @@ The numbered ramp is the shared foundation. Light themes use 50 for the shell, t
 
 ## Layout
 
-The main content and toolbar share a centered maximum width of 64rem with 24px horizontal gutters. The main content starts with 16px top padding and 32px bottom padding. The toolbar has a 78px minimum height until the 640px compact breakpoint; at the 768px utility breakpoint it places identity and actions in two columns, otherwise they stack. Controls and card action rows wrap.
+The main content and toolbar share a centered maximum width of 64rem with 24px horizontal gutters. The main content starts with 16px top padding and 32px bottom padding. The toolbar has a 96px minimum height until the 760px compact breakpoint; at the 768px utility breakpoint it places identity and actions in two columns, otherwise they stack. Controls and card action rows wrap.
 
 Accounts form one column with 12px gaps and 16px internal padding. Shared spacing progresses through compact, control-gap, row-gap, card, dialog and gutter tokens. Active and other account groups remain explicit. Search spans the content width. Advanced settings live in a dialog up to 32rem wide, with 16px outer margins, 20px sections and a scrolling body capped at 70vh.
 
-Appearance choices form two columns with 8px gaps, becoming one column at 420px. Claude automation uses two columns from 640px. Long translated labels must use the existing wrapping behavior rather than fixed text widths. Dates and numbers use the active locale.
+Theme identity choices form two columns with 8px gaps, becoming one column at 420px. A separate two-option Light/Dark radio group applies to every theme. The provider navigation and automatic warm-up control share a wrapping header row. Long translated labels must use the existing wrapping behavior rather than fixed text widths. Dates and numbers use the active locale.
 
 ## Elevation & Depth
 
@@ -276,7 +278,7 @@ Settings fields use a full-width surface, thin neutral border, theme control rad
 
 ### Navigation
 
-Provider navigation is a compact segmented control with 3px track padding and gap. Selected segments use a surfaced fill, border and short shadow; Terminal uses light phosphor on dark, and Mono uses black on white. Buttons expose their pressed state and remain keyboard accessible. The toolbar displays actions for the selected provider. Open Codex appears only for Codex when no Codex process is running; Claude's import, refresh and add controls belong to its own section.
+Provider navigation is a compact segmented control with 3px track padding and gap. Selected segments use a surfaced fill, border and short shadow; Terminal uses light phosphor on dark, and Mono uses black on white. Buttons expose their pressed state and remain keyboard accessible. Both provider screens share one header: identity, automatic-switch toggle, privacy, refresh, warm-up, menu, settings and account controls remain in the same positions. The provider segments include account counts and share their row with automatic warm-up. Commands route to the selected provider; each provider retains its own automation state. Claude import and account creation live in the common account menu, while Code/Desktop launch and sign-in details stay attached to account cards. Open Codex and running Codex process controls remain provider-specific. The shared timer menu retains Codex-only scheduling because Claude has no corresponding scheduled-warm-up command.
 
 ### Remaining quota
 
@@ -296,4 +298,6 @@ A 6px rounded track carries the remaining percentage, window label and reset tim
 - **Don't** infer verified quota from a loading or unknown state.
 - **Don't** use real account identities or credentials in documentation examples.
 
-Not canonized: the build's 10–11px tertiary helper/preview text and faint loading placeholders are inherited density/legibility debt, not reusable text roles; explicit black/neutral menu exceptions are not a second theme system. The OS screen-sharing overlay is outside the application. No new UI or independent visual/contrast audit was performed during documentation.
+Not canonized: the build's 10–11px tertiary helper text and faint loading placeholders are inherited density/legibility debt, not reusable text roles; explicit black/neutral menu exceptions are not a second theme system. The OS screen-sharing overlay is outside the application. Documentation follows the implemented source. Theme state tests cover all fourteen identity/mode combinations and legacy selections; a complete independent visual/contrast audit is not implied.
+
+Both providers group the selected Code account under Active account, followed by Other accounts. Claude keeps its separate Desktop profile label; provider color marks the active card in both appearances.

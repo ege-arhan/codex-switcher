@@ -1,4 +1,4 @@
-import { THEMES, normalizeTheme, type ThemeMode } from "../lib/theme";
+import { THEMES, normalizeTheme, getThemeAppearance, type ThemeMode } from "../lib/theme";
 import { t, useI18n, localizeMessage } from "../lib/i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DesktopReopenPreference } from "../lib/desktopReopen";
@@ -38,6 +38,7 @@ export function SettingsModal({
   const [error, setError] = useState<string | null>(null);
   const requestId = useRef(0);
   const desktop = isTauriRuntime();
+  const appearance = getThemeAppearance(themeMode);
 
   const loadSettings = useCallback(async () => {
     const currentRequest = ++requestId.current;
@@ -135,13 +136,24 @@ export function SettingsModal({
             <option value="tr">Türkçe</option><option value="en">{t("English")}</option>
           </select>
           <fieldset className="theme-picker">
-            <legend className="text-sm font-medium text-gray-900 dark:text-gray-100">{t("Appearance")}</legend>
+            <legend className="text-sm font-medium text-gray-900 dark:text-gray-100">{t("Theme")}</legend>
             <div className="theme-options">
               {THEMES.map((theme) => (
                 <label key={theme.id} className="theme-option" data-selected={normalizeTheme(themeMode) === theme.id}>
-                  <input type="radio" name="interface-theme" value={theme.id} checked={normalizeTheme(themeMode) === theme.id} onChange={() => onThemeChange(theme.id)} />
-                  <span className="theme-preview" data-preview={theme.id} aria-hidden="true"><span /><i /><i /></span>
+                  <input type="radio" name="interface-theme" value={theme.id} checked={normalizeTheme(themeMode) === theme.id} onChange={() => onThemeChange(`${theme.id}:${appearance}`)} />
+                  <span className="theme-preview" data-preview={theme.id} data-appearance={appearance} aria-hidden="true"><span /><i /><i /></span>
                   <span className="theme-option-copy"><strong>{t(theme.name)}</strong><span>{t(theme.description)}</span></span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <fieldset className="appearance-picker">
+            <legend className="text-sm font-medium text-gray-900 dark:text-gray-100">{t("Color mode")}</legend>
+            <div className="appearance-options">
+              {(["light", "dark"] as const).map((mode) => (
+                <label key={mode} className="appearance-option" data-selected={appearance === mode}>
+                  <input type="radio" name="interface-appearance" value={mode} checked={appearance === mode} onChange={() => onThemeChange(`${normalizeTheme(themeMode)}:${mode}`)} />
+                  <span>{t(mode === "light" ? "Light" : "Dark")}</span>
                 </label>
               ))}
             </div>

@@ -1,0 +1,11 @@
+.provider-navigation { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding-bottom: 14px; }
+.provider-navigation .provider-nav { margin: 0; }
+.provider-auto-warmup { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; color: var(--neutral-700); cursor: pointer; }
+.dark .provider-auto-warmup { color: var(--neutral-200); }
+.provider-auto-warmup input { width: 16px; height: 16px; accent-color: var(--accent); }
+.app-header .app-toolbar { min-height: 78px; }
+.provider-section--claude > details { border-top: 0; padding-top: 0; padding-bottom: 8px; }
+@media (max-width: 760px) {
+  .app-header .app-toolbar { min-height: 0; }
+  .provider-navigation { align-items: flex-start; }
+}

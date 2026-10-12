@@ -2,11 +2,12 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { localizeProductMessage } from "./i18nMessages";
 import { shellTranslations } from "./i18nShell";
 import { componentTranslations } from "./i18nComponents";
+import { themeAppearanceTranslations } from "./i18nThemeAppearance";
 import { claudeTranslations } from "./i18nClaude";
 import { getLanguage, LANGUAGE_CHANGED_EVENT, LANGUAGE_STORAGE_KEY, normalizeLanguage, rememberLanguage, translate, type Language } from "./i18nLanguage";
 const isTauriRuntime = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 export { getLanguage, getLocale, LANGUAGE_STORAGE_KEY, type Language } from "./i18nLanguage";
-const dictionary = { ...shellTranslations, ...componentTranslations, ...claudeTranslations };
+const dictionary = { ...shellTranslations, ...componentTranslations, ...claudeTranslations, ...themeAppearanceTranslations };
 export function t(source: string, params?: Record<string, string | number>): string {
   return translate(source, getLanguage(), dictionary, params);
 }

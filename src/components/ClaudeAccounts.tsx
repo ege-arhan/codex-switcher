@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, forwardRef, useImperativeHandle, useCallback, useEffect, useRef, useState } from "react";
+import { canWarmupClaude } from "../lib/claudeWarmup";
 import { open } from "@tauri-apps/plugin-dialog";
 import { RateLimitBar } from "./UsageBar";
 import { useI18n, localizeMessage } from "../lib/i18n";
@@ -9,6 +10,7 @@ interface ClaudeUsage {
     five_hour_resets_at: string | null;
     seven_day_resets_at: string | null;
     checked_at: number;
+    model_used?: number | null;
 }
 interface ClaudeProfile {
     id: string;
@@ -37,7 +39,14 @@ interface ClaudeLogin {
     error: string | null;
 }
 const button = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d97757] rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-600 dark:text-gray-100 dark:hover:bg-gray-800";
-export function ClaudeAccounts({ onAccountCountChange }: { onAccountCountChange: (count: number) => void }) {
+export type ClaudeToolbarCommand = "refresh" | "warmup" | "add" | "import" | "auto-switch" | "auto-warmup";
+export interface ClaudeToolbarState { ready: boolean; busy: boolean; autoSwitch: boolean; autoWarmup: boolean }
+export interface ClaudeAccountsHandle { run: (command: ClaudeToolbarCommand) => Promise<void> }
+export const ClaudeAccounts = forwardRef<ClaudeAccountsHandle, {
+    onAccountCountChange: (count: number) => void;
+    onToolbarChange: (state: ClaudeToolbarState) => void;
+    masked: boolean;
+}>(function ClaudeAccounts({ onAccountCountChange, onToolbarChange, masked }, ref) {
     const { t, locale } = useI18n();
     const [returnInput, setReturnInput] = useState("");
     const [store, setStore] = useState<ClaudeProfiles | null>(null);
@@ -123,6 +132,37 @@ export function ClaudeAccounts({ onAccountCountChange }: { onAccountCountChange:
             setBusy(false);
         }
     };
+    useEffect(() => {
+        onToolbarChange({ ready: !!store && desktop, busy, autoSwitch: store?.auto_switch_enabled ?? false, autoWarmup: store?.auto_warmup_enabled ?? false });
+    }, [store, busy, desktop, onToolbarChange]);
+    useImperativeHandle(ref, () => ({
+        async run(command) {
+            if (busy || !store) return;
+            if (command === "add") {
+                setError(null); setEmail(""); setLogin(null); setAdding(true);
+            } else if (command === "warmup") {
+                setBusy(true); setError(null);
+                try {
+                    const candidates = store.profiles.filter(profile => canWarmupClaude(profile));
+                    if (candidates.length === 0) setError("No verified Claude quota is available for warm-up");
+                    for (const profile of candidates) {
+                        try { await invokeBackend("warmup_claude_account", { profileId: profile.id }); }
+                        catch (error) { setError(String(error)); }
+                    }
+                } catch (error) { setError(String(error)); }
+                finally { await load(); setBusy(false); }
+            } else {
+                const commands = {
+                    refresh: ["refresh_claude_profiles", undefined],
+                    import: ["import_current_claude_profile", undefined],
+                    "auto-switch": ["set_claude_auto_switch", { enabled: !store.auto_switch_enabled }],
+                    "auto-warmup": ["set_claude_auto_warmup", { enabled: !store.auto_warmup_enabled }],
+                } as const;
+                const [name, args] = commands[command];
+                await action(name, args);
+            }
+        }
+    }));
     const startLogin = async () => {
         setBusy(true);
         setError(null);
@@ -204,36 +244,14 @@ export function ClaudeAccounts({ onAccountCountChange }: { onAccountCountChange:
         const seconds = value ? Date.parse(value) / 1000 : NaN;
         return Number.isFinite(seconds) ? seconds : null;
     };
+    const activeProfile = store?.profiles.find(p => p.id === store.active_code_id);
+    const otherProfiles = store?.profiles.filter(p => p.id !== activeProfile?.id) ?? [];
+    const orderedProfiles = activeProfile ? [activeProfile, ...otherProfiles] : otherProfiles;
     const loginProfile = store?.profiles.find(p => p.id === login?.profile_id);
     if (!desktop)
         return null;
     return (<section aria-labelledby="claude-accounts-title" className="provider-section provider-section--claude space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 id="claude-accounts-title" className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t("Claude accounts")}</h2>
-          <p className="text-sm text-gray-600 dark:text-gray-300">{t("Manage Claude Code and Claude Desktop sign-ins.")}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button className={button} disabled={busy} onClick={() => void action("import_current_claude_profile")}>{t("Import current account")}</button>
-          <button className={button} disabled={busy} onClick={() => void action("refresh_claude_profiles")}>{t("Refresh usage")}</button>
-          <button className={button} disabled={busy || !store} onClick={() => { setError(null); setEmail(""); setLogin(null); setAdding(true); }}>{t("Add account")}</button>
-        </div>
-      </div>
-      <div className="automation-controls grid gap-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900 sm:grid-cols-2">
-      <div>
-      <label className="flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-gray-100">
-        <input type="checkbox" checked={store?.auto_switch_enabled ?? false} disabled={busy || !store} onChange={(e) => void action("set_claude_auto_switch", { enabled: e.target.checked })}/>
-        {t("Claude Code auto-switch")}
-      </label>
-      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{t("Auto-switch uses only verified Pro, Max, Team or Enterprise accounts with remaining usage.")}</p>
-      </div>
-      <div>
-      <label className="flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-gray-100">
-        <input type="checkbox" checked={store?.auto_warmup_enabled ?? false} disabled={busy || !store} onChange={e => void action("set_claude_auto_warmup", { enabled: e.target.checked })}/>
-        {t("Claude auto warm-up")}
-      </label>
-      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{t("Warm-up sends a minimal request when an unused usage window resets.")}</p>
-      </div>
+      <h2 id="claude-accounts-title" className="sr-only">{t("Claude accounts")}</h2>
       <details className="sm:col-span-2 border-t border-gray-200 pt-3 dark:border-gray-700">
       <summary className="cursor-pointer text-sm font-medium text-gray-700 dark:text-gray-200">{t("Project and switching details")}</summary>
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
@@ -243,20 +261,22 @@ export function ClaudeAccounts({ onAccountCountChange }: { onAccountCountChange:
       </div>
       <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">{t("When a managed terminal reaches its limit, switch to an account with verified remaining usage and resume the same local chat. Desktop cloud chats stay with their account.")}</p>
       </details>
-      </div>
       {store?.auto_switch_enabled && store.waiting_for_quota && <p role="status" className="mt-3 rounded-lg border border-[#d97757] p-3 text-sm text-orange-900 dark:text-orange-100">{t("No paid Claude account has verified remaining usage. Waiting for limits to reset; accounts are checked every 30 seconds.")}</p>}
       {error && <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">{localizeMessage(error)}</p>}
       {store?.profiles.length === 0 && <p className="mt-4 text-sm text-gray-600 dark:text-gray-300">{t("Import your current Claude Code account, then generate a login link for another account.")}</p>}
       <div className="account-list grid gap-3">
-        {store?.profiles.map((p) => (<article key={p.id} data-active={store.active_code_id === p.id} className={`account-card account-card--claude rounded-xl border bg-white p-4 dark:bg-gray-900 ${store.active_code_id === p.id ? "border-[#d97757]" : "border-gray-200 dark:border-gray-700"}`}>
+        {orderedProfiles.map((p, index) => (<Fragment key={p.id}>
+            {activeProfile && index === 0 && <h2 className="text-base font-semibold text-gray-700 dark:text-gray-200">{t("Active Account")}</h2>}
+            {index === (activeProfile ? 1 : 0) && <h2 className="mt-4 text-base font-semibold text-gray-700 dark:text-gray-200">{t("Other Accounts ({count})", { count: otherProfiles.length })}</h2>}
+            <article data-active={store?.active_code_id === p.id} className={`account-card account-card--claude rounded-xl border bg-white p-4 dark:bg-gray-900 ${store?.active_code_id === p.id ? "border-[#d97757]" : "border-gray-200 dark:border-gray-700"}`}>
             <div className="account-card-header flex flex-wrap items-center justify-between gap-2">
-              <h3 className="break-all font-semibold text-gray-900 dark:text-gray-100">{p.email}</h3>
+              <h3 className="break-all font-semibold text-gray-900 dark:text-gray-100">{p.id === activeProfile?.id && <span className="mr-2 inline-block h-2 w-2 rounded-full bg-[#d97757]" aria-hidden="true" />}{masked ? "••••••@••••••" : p.email}</h3>
               <span className="rounded-full border border-[#d97757] px-2 py-1 text-xs font-medium text-orange-900 dark:text-orange-100">{({pro: "Pro", max: "Max", team: "Team", enterprise: "Enterprise", free: t("Free")} as Record<string, string>)[p.plan_type ?? ""] ?? t("Unknown plan")}</span>
             </div>
             <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
               {p.logged_in ? t("Code sign-in verified") : t("Code sign-in required")}
-              {store.active_code_id === p.id && t(" \u00B7 Selected Code account")}
-              {store.active_desktop_id === p.id && t(" \u00B7 Selected Desktop profile")}
+              {store?.active_code_id === p.id && t(" \u00B7 Selected Code account")}
+              {store?.active_desktop_id === p.id && t(" \u00B7 Selected Desktop profile")}
             </p>
             <div className="mt-3 space-y-2">
               {p.usage ? <>
@@ -281,7 +301,7 @@ export function ClaudeAccounts({ onAccountCountChange }: { onAccountCountChange:
               {!p.is_default && <button className={button} disabled={busy} onClick={() => { setError(null); setEmail(p.email); setLogin(null); setAdding(true); }}>{t("Code login link")}</button>}
               </div>
             </details>
-          </article>))}
+          </article></Fragment>))}
       </div>
       <dialog ref={dialog} aria-labelledby="claude-dialog-title" onCancel={(e) => { e.preventDefault(); void closeDialog(); }} className="m-auto w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-6 text-gray-900 shadow-xl backdrop:bg-black/50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">
         <h3 id="claude-dialog-title" className="text-lg font-semibold">{desktopTarget ? t("Switch Claude Desktop account") : t("Add Claude account")}</h3>
@@ -326,4 +346,4 @@ export function ClaudeAccounts({ onAccountCountChange }: { onAccountCountChange:
         <button className={`${button} mt-4`} disabled={busy} onClick={() => void closeDialog()}>{login?.status === "pending" ? t("Cancel sign-in") : t("Close")}</button>
       </dialog>
     </section>);
-}
+});

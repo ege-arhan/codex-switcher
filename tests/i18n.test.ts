@@ -3,10 +3,11 @@ import test from "node:test";
 import { getLanguage, getLocale, LANGUAGE_STORAGE_KEY, normalizeLanguage, translate } from "../src/lib/i18nLanguage.ts";
 import { shellTranslations } from "../src/lib/i18nShell.ts";
 import { componentTranslations } from "../src/lib/i18nComponents.ts";
+import { themeAppearanceTranslations } from "../src/lib/i18nThemeAppearance.ts";
 import { claudeTranslations } from "../src/lib/i18nClaude.ts";
 import { localizeProductMessage } from "../src/lib/i18nMessages.ts";
 
-const dictionary = { ...shellTranslations, ...componentTranslations, ...claudeTranslations };
+const dictionary = { ...shellTranslations, ...componentTranslations, ...claudeTranslations, ...themeAppearanceTranslations };
 
 test("language preference persists and selects matching date and number locales", () => {
   const values = new Map<string, string>();

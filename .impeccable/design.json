@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-12T19:40:11.768416+00:00",
+  "generatedAt": "2026-10-12T20:58:23.737749+00:00",
   "title": "Design System: Codex Switcher",
   "extensions": {
     "colorMeta": {
@@ -1201,7 +1201,7 @@
       "name": "Provider navigation",
       "kind": "nav",
       "refersTo": "provider-tab",
-      "description": "Pressed-state navigation; dark and special-theme color treatments remain in App.css.",
+      "description": "Account-count segments in the common provider header. Shared privacy, refresh, warm-up, settings and account commands route to the selected provider. Automatic switch and automatic warm-up retain separate provider state; theme appearance applies to both screens.",
       "html": "<nav class=\"ds-nav\" aria-label=\"Accounts\"><button aria-pressed=\"true\">Codex</button><button aria-pressed=\"false\">Claude</button></nav>",
       "css": ".ds-nav {display:flex;width:fit-content;gap:3px;padding:3px;background:var(--neutral-200,#dedee2);border-radius:var(--control-radius,7px);}.ds-nav button {font:600 13px/20px var(--app-font,sans-serif);padding:7px 18px;border:1px solid transparent;border-radius:var(--control-radius,7px);color:var(--neutral-900,#202027);background:transparent;cursor:pointer;}.ds-nav button[aria-pressed=\"true\"] {background:var(--surface,#fff);border-color:var(--neutral-300,#c8c8ce);box-shadow:0 1px 2px #0000000a;}.ds-nav button:focus-visible { outline: 2px solid var(--accent, #006bd6); outline-offset: 3px; }"
     },
@@ -1232,17 +1232,17 @@
   ],
   "narrative": {
     "northStar": "Familiar desktop utility",
-    "overview": "Identity, verified remaining quota and the next action establish the hierarchy. The default macOS presentation uses quiet surfaces and system typography, with compact controls and aligned account rows. This is an operational desktop utility inside Tauri, with a React interface.\n\nWindows XP, Windows 7, Terminal, Paper, Nord and Mono are alternate presentations of the same controls. Theme selection changes the neutral ramp, accent, font and geometry together. It does not change account behavior. The user's explicit familiar OS direction permits system fonts and authentic period chrome.",
+    "overview": "Identity, verified remaining quota and the next action establish the hierarchy. The default macOS presentation uses quiet surfaces and system typography, with compact controls and aligned account rows. This is an operational desktop utility inside Tauri, with a React interface.\n\nWindows XP, Windows 7, Terminal, Paper, Nord and Mono are alternate presentations of the same controls. Theme selection changes the neutral ramp, accent, font and geometry together. A separate Light/Dark control applies to each of the seven identities; explicit mode selection persists and synchronizes to the tray. Fresh installations default to macOS light, while historical plain IDs and legacy light/dark storage preserve their original meaning. It does not change account behavior. The user's explicit familiar OS direction permits system fonts and authentic period chrome.",
     "keyCharacteristics": [
       "Identity before actions; remaining quota before advanced detail.",
-      "Seven coordinated themes with a shared component structure.",
+      "Seven theme identities, each in light and dark mode, sharing one provider header and component structure.",
       "Provider accents and labeled status remain independent of theme accents.",
       "Turkish and English labels, wrapping actions and tabular account numerals."
     ],
     "rules": [
       {
         "name": "Theme Together",
-        "body": "Apply the selected neutral ramp, font, radii and accent as one presentation; Terminal and Nord also select dark mode.",
+        "body": "Apply the selected neutral ramp, font, radii and accent together. Light/dark selects surface roles without changing theme identity. Selecting another identity preserves the selected mode; legacy theme IDs retain their original default appearance.",
         "section": "colors"
       },
       {
@@ -1259,13 +1259,19 @@
         "name": "Period Chrome",
         "body": "Keep the existing XP and Aero gradients and bevels in their period themes; use the other themes' own flat or tonal materials elsewhere.",
         "section": "elevation"
+      },
+      {
+        "name": "Common Provider Header",
+        "body": "Keep privacy, refresh, warm-up, settings, account actions and automation controls in one header for both providers. Route commands and automation state to the selected provider; keep provider-specific launch and scheduling capabilities explicit.",
+        "section": "navigation"
       }
     ],
     "dos": [
       "**Do** switch theme tokens together and preserve provider and warning semantics.",
       "**Do** keep identity, remaining quota and the next action visible before advanced settings.",
       "**Do** preserve visible keyboard focus, explicit status labels and locale-aware values.",
-      "**Do** allow action rows and translated copy to wrap inside the shared content width."
+      "**Do** allow action rows and translated copy to wrap inside the shared content width.",
+      "**Do** place the selected Code account under Active account for both providers, preserving the separate Claude Desktop profile status."
     ],
     "donts": [
       "**Don't** spread XP or Aero chrome into the other themes.",

@@ -1,3 +1,4 @@
+import "./components/ProviderToolbar.css";
 import { t, useI18n, localizeMessage } from "./lib/i18n";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -5,7 +6,7 @@ import { useAccounts } from "./hooks/useAccounts";
 import { useDesktopReopen } from "./hooks/useDesktopReopen";
 import { useCodexClosePreference } from "./hooks/useCodexClosePreference";
 import { SettingsModal } from "./components/SettingsModal";
-import { ClaudeAccounts } from "./components/ClaudeAccounts";
+import { ClaudeAccounts, type ClaudeAccountsHandle, type ClaudeToolbarState } from "./components/ClaudeAccounts";
 import { finishForceClose, type DesktopReopenPreference } from "./lib/desktopReopen";
 import type { CodexClosePreference } from "./lib/codexClosePreference";
 import { useForceCloseCodexProcesses } from "./hooks/useForceCloseCodexProcesses";
@@ -293,8 +294,17 @@ function App() {
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
   const navMenuRef = useRef<HTMLDivElement | null>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>(readStoredTheme);
+  const claudeAccountsRef = useRef<ClaudeAccountsHandle>(null);
+  const [claudeToolbar, setClaudeToolbar] = useState<ClaudeToolbarState>({ ready: false, busy: false, autoSwitch: false, autoWarmup: false });
+  const [claudeMasked, setClaudeMasked] = useState(false);
   const [claudeAccountCount, setClaudeAccountCount] = useState<number | null>(null);
   const [provider, setProvider] = useState<"codex" | "claude">("codex");
+  const providerAutoSwitch = provider === "codex" ? appSettings?.auto_switch_limit_enabled ?? false : claudeToolbar.autoSwitch;
+  const providerAutoWarmup = provider === "codex" ? autoWarmupAllEnabled : claudeToolbar.autoWarmup;
+  const providerBusy = provider === "codex" ? isRefreshing || isWarmingAll : claudeToolbar.busy;
+  const runClaude = (command: Parameters<ClaudeAccountsHandle["run"]>[0]) => { void claudeAccountsRef.current?.run(command); };
+  useEffect(() => { setIsNavMenuOpen(false); setIsActionsMenuOpen(false); setIsTimedWarmupOpen(false); }, [provider]);
+
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const [closeBehaviorPromptOpen, setCloseBehaviorPromptOpen] = useState(false);
   const [closeBehaviorDontAskAgain, setCloseBehaviorDontAskAgain] = useState(false);
@@ -1014,12 +1024,7 @@ function App() {
     []
   );
 
-  const headerAutoWarmupLabel = useMemo(() => {
-    if (autoWarmupRunningIds.size > 0) return t("Auto warming...");
-    return autoWarmupAllEnabled || autoWarmupAccountIds.size > 0
-      ? t("Auto: on")
-      : t("Auto: off");
-  }, [autoWarmupAccountIds.size, autoWarmupAllEnabled, autoWarmupRunningIds, language]);
+
 
   const timedWarmupTargetsReady = useMemo(
     () =>
@@ -1502,15 +1507,15 @@ function App() {
                   <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 tracking-tight">
                     Codex Switcher
                   </h1>
-                  {isTauriRuntime() && provider === "codex" && <button
+                  {isTauriRuntime() && <button
                     type="button"
                     role="switch"
                     aria-label={t("Automatic account switching on usage limit")}
-                    aria-checked={appSettings?.auto_switch_limit_enabled ?? false}
-                    onClick={() => void handleToggleAutoSwitch()}
-                    disabled={!appSettings || autoSwitchSaving}
+                    aria-checked={providerAutoSwitch}
+                    onClick={() => provider === "codex" ? void handleToggleAutoSwitch() : runClaude("auto-switch")}
+                    disabled={provider === "codex" ? !appSettings || autoSwitchSaving : !claudeToolbar.ready || claudeToolbar.busy}
                     className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
-                      appSettings?.auto_switch_limit_enabled
+                      providerAutoSwitch
                         ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300"
                         : "border-gray-200 bg-gray-100 text-gray-600 hover:bg-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
                     }`}
@@ -1518,17 +1523,17 @@ function App() {
                   >
                     <span
                       className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${
-                        appSettings?.auto_switch_limit_enabled ? "bg-emerald-500" : "bg-gray-400 dark:bg-gray-600"
+                        providerAutoSwitch ? "bg-emerald-500" : "bg-gray-400 dark:bg-gray-600"
                       }`}
                       aria-hidden="true"
                     >
                       <span
                         className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${
-                          appSettings?.auto_switch_limit_enabled ? "translate-x-3.5" : "translate-x-0.5"
+                          providerAutoSwitch ? "translate-x-3.5" : "translate-x-0.5"
                         }`}
                       />
                     </span>
-                    <span className="select-none"> {t("Auto-switch")} {appSettings ? (appSettings.auto_switch_limit_enabled ? t("On") : t("Off")) : "…"}
+                    <span className="select-none"> {t("Auto-switch")} {(provider === "codex" ? !!appSettings : claudeToolbar.ready) ? (providerAutoSwitch ? t("On") : t("Off")) : "…"}
                     </span>
                   </button>}
                   {processInfo && provider === "codex" && (
@@ -1575,14 +1580,14 @@ function App() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0 md:ml-4 md:w-max md:flex-nowrap md:justify-end">
-              {provider === "codex" && <>
+              <>
               <button
-                onClick={toggleMaskAll}
+                onClick={() => provider === "codex" ? toggleMaskAll() : setClaudeMasked(value => !value)}
                 className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 shrink-0"
-                aria-label={allMasked ? t("Show all account names and emails") : t("Hide all account names and emails")}
-                title={allMasked ? t("Show all account names and emails") : t("Hide all account names and emails")}
+                aria-label={(provider === "codex" ? allMasked : claudeMasked) ? t("Show all account names and emails") : t("Hide all account names and emails")}
+                title={(provider === "codex" ? allMasked : claudeMasked) ? t("Show all account names and emails") : t("Hide all account names and emails")}
               >
-                {allMasked ? (
+                {(provider === "codex" ? allMasked : claudeMasked) ? (
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path
                       strokeLinecap="round"
@@ -1599,28 +1604,28 @@ function App() {
                 )}
               </button>
               <button
-                onClick={handleRefresh}
-                disabled={isRefreshing}
+                onClick={() => provider === "codex" ? void handleRefresh() : runClaude("refresh")}
+                disabled={providerBusy || (provider === "claude" && !claudeToolbar.ready)}
                 className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100 text-gray-700 transition-colors hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 shrink-0"
                 aria-label={t("Refresh all usage")}
-                title={isRefreshing ? t("Refreshing all usage") : t("Refresh all usage")}
+                title={providerBusy ? t("Refreshing all usage") : t("Refresh all usage")}
               >
-                <svg aria-hidden="true" className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                <svg aria-hidden="true" className={`h-4 w-4 ${providerBusy ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
               <button
-                onClick={() => void handleWarmupAll()}
-                disabled={isWarmingAll || accounts.length === 0}
+                onClick={() => provider === "codex" ? void handleWarmupAll() : runClaude("warmup")}
+                disabled={providerBusy || (provider === "codex" ? accounts.length === 0 : !claudeToolbar.ready || !claudeAccountCount)}
                 className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors disabled:opacity-50 shrink-0 ${
-                  isWarmingAll
+                  providerBusy
                     ? "bg-amber-100 text-amber-500 dark:bg-amber-900/30 dark:text-amber-300"
                     : "bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/40"
                 }`}
                 aria-label={t("Warm up all accounts")}
-                title={isWarmingAll ? t("Warming up all accounts") : t("Warm up all accounts")}
+                title={providerBusy ? t("Warming up all accounts") : t("Warm up all accounts")}
               >
                 <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m13 3-8 11h6l-1 7 9-12h-6l1-6Z" strokeLinejoin="round"/></svg>
               </button>
-              {isAccountSearchEnabled && (
+              {provider === "codex" && isAccountSearchEnabled && (
                 <button
                   onClick={() => {
                     if (isAccountSearchOpen) {
@@ -1653,6 +1658,8 @@ function App() {
                       ? "bg-gray-900 text-white hover:bg-gray-800 dark:bg-black dark:text-white dark:hover:bg-neutral-900"
                       : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                   }`}
+                  aria-label={t("Menu")}
+                  aria-expanded={isNavMenuOpen}
                   title={t("Menu")}
                 >
                   <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
@@ -1670,31 +1677,14 @@ function App() {
                       }}
                       className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-gray-100 dark:text-white dark:hover:bg-neutral-900"
                     > {t("Settings")} </button>
+                    {provider === "claude" && <p className="px-3 py-2 text-xs text-gray-600 dark:text-gray-300">{t("Auto-switch uses only verified Pro, Max, Team or Enterprise accounts with remaining usage.")}</p>}
                     <label className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm">
                       <span>{t("Language")}</span>
                       <select aria-label={t("Language")} value={language} onChange={(event) => setLanguage(event.target.value as "tr" | "en")} className="rounded-md border border-gray-300 bg-white px-2 py-1 text-gray-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white">
                         <option value="tr">Türkçe</option><option value="en">{t("English")}</option>
                       </select>
                     </label>
-                    <button
-                      onClick={() => {
-                        setIsNavMenuOpen(false);
-                        setAutoWarmupAllEnabled((prev) => !prev);
-                      }}
-                      disabled={accounts.length === 0}
-                      className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-gray-100 disabled:opacity-50 dark:text-white dark:hover:bg-neutral-900"
-                    >
-                      <span>{t("Auto Warm Up")}</span>
-                      <span
-                        className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
-                          autoWarmupAllEnabled
-                            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
-                            : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
-                        }`}
-                      >
-                        {headerAutoWarmupLabel}
-                      </span>
-                    </button>
+                    {provider === "codex" && <>
                     <button
                       onClick={() => {
                         setIsNavMenuOpen(false);
@@ -1713,6 +1703,7 @@ function App() {
                         {timedWarmupLabel}
                       </span>
                     </button>
+                    </>}
                     <button
                       onClick={() => {
                         setIsNavMenuOpen(false);
@@ -1781,11 +1772,12 @@ function App() {
                   </div>
                 )}
               </div>
-              </>}
+              </>
               <button type="button" className="settings-trigger h-10 rounded-lg border border-gray-300 px-3 text-sm dark:border-gray-700" onClick={() => setIsSettingsOpen(true)}>{t("Settings")}</button>
-              <div className={provider === "claude" ? "hidden" : "relative"} ref={actionsMenuRef}>
+              <div className="relative" ref={actionsMenuRef}>
                 <button
                   onClick={() => setIsActionsMenuOpen((prev) => !prev)}
+                  aria-expanded={isActionsMenuOpen}
                   className="h-10 px-4 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white transition-colors hover:bg-gray-800 dark:bg-black dark:hover:bg-neutral-900 shrink-0 whitespace-nowrap"
                 >
                   {t("Account")} ▾
@@ -1795,10 +1787,12 @@ function App() {
                     <button
                       onClick={() => {
                         setIsActionsMenuOpen(false);
-                        setIsAddModalOpen(true);
+                        if (provider === "codex") setIsAddModalOpen(true); else runClaude("add");
                       }}
                       className="w-full rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-gray-100 dark:text-white dark:hover:bg-neutral-900"
                     > {t("+ Add Account")} </button>
+                    {provider === "claude" && <button disabled={!claudeToolbar.ready || claudeToolbar.busy} className="w-full rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-gray-100 dark:text-white dark:hover:bg-neutral-900" onClick={() => { setIsActionsMenuOpen(false); runClaude("import"); }}>{t("Import current account")}</button>}
+                    {provider === "codex" && <>
                     <button
                       onClick={() => {
                         setIsActionsMenuOpen(false);
@@ -1839,22 +1833,26 @@ function App() {
                     >
                       {isImportingFull ? t("Importing...") : t("Import Full Encrypted File")}
                     </button>
+                    </>}
                   </div>
                 )}
               </div>
             </div>
           </div>
         </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-5xl mx-auto px-6 pt-4 pb-8">
-        {quotaWaiting && <p role="status" className="mb-4 rounded-lg border border-amber-500 p-3 text-sm text-amber-900 dark:text-amber-200">{localizeMessage(quotaWaiting)}</p>}
+        <div className="provider-navigation max-w-5xl mx-auto px-6">
         <nav aria-label={t("Accounts")} className="provider-nav mb-5 flex gap-1 border-b border-gray-200 dark:border-gray-800">
           <button type="button" aria-pressed={provider === "codex"} onClick={() => setProvider("codex")} className="provider-tab px-4 py-2.5 text-sm font-semibold">Codex <span className="ml-1 text-xs tabular-nums">{accounts.length}</span></button>
           <button type="button" aria-pressed={provider === "claude"} onClick={() => setProvider("claude")} className="provider-tab px-4 py-2.5 text-sm font-semibold">Claude <span className="ml-1 text-xs tabular-nums">{claudeAccountCount ?? "…"}</span></button>
         </nav>
-        <div hidden={provider !== "claude"}><ClaudeAccounts onAccountCountChange={setClaudeAccountCount} /></div>
+          <label className="provider-auto-warmup" title={t("Warm-up sends a minimal request when an unused usage window resets.")}><input type="checkbox" aria-label={t("Auto Warm Up")} checked={providerAutoWarmup} disabled={provider === "codex" ? accounts.length === 0 : !claudeToolbar.ready || claudeToolbar.busy} onChange={() => provider === "codex" ? setAutoWarmupAllEnabled(value => !value) : runClaude("auto-warmup")} />{t("Auto Warm Up")}{provider === "codex" && autoWarmupRunningIds.size > 0 && <span role="status">{t("Auto warming...")}</span>}{provider === "codex" && !autoWarmupAllEnabled && autoWarmupAccountIds.size > 0 && <span className="text-xs">{t("Auto: on")}</span>}</label>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-5xl mx-auto px-6 pt-4 pb-8">
+        {provider === "codex" && quotaWaiting && <p role="status" className="mb-4 rounded-lg border border-amber-500 p-3 text-sm text-amber-900 dark:text-amber-200">{localizeMessage(quotaWaiting)}</p>}
+        <div hidden={provider !== "claude"}><ClaudeAccounts ref={claudeAccountsRef} onAccountCountChange={setClaudeAccountCount} onToolbarChange={setClaudeToolbar} masked={claudeMasked} /></div>
         <div hidden={provider !== "codex"}>
         {loading && accounts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20">
