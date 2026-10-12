@@ -1,4 +1,13 @@
 export const componentTranslations: Record<string, string> = {
+  "Quiet and familiar": "Sade ve tanıdık",
+  "Classic blue and silver": "Klasik mavi ve gümüş",
+  "Soft glass and sky blue": "Yumuşak cam ve gök mavisi",
+  "Phosphor green on black": "Siyah üzerinde fosfor yeşili",
+  "Warm paper and ink": "Sıcak kâğıt ve mürekkep",
+  "Cool and comfortable": "Serin ve rahat",
+  "Black, white and nothing extra": "Yalın siyah ve beyaz",
+  "Paper": "Kâğıt",
+
   "now": "şimdi",
   "Fetching usage...": "Kullanım alınıyor...",
   "No rate limit data": "Kullanım limiti verisi yok",

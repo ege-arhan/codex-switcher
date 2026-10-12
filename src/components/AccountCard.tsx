@@ -50,7 +50,7 @@ function getSubscriptionStatus(timestamp: string | null | undefined): {
   if (!timestamp) {
     return {
       label: t("Expiry unavailable"),
-      className: "text-gray-400 dark:text-gray-500",
+      className: "text-gray-500 dark:text-gray-400",
     };
   }
 
@@ -85,7 +85,7 @@ function getSubscriptionStatus(timestamp: string | null | undefined): {
 
   return {
     label: t("Until {date}", { date: formattedDate }),
-    className: "text-gray-400 dark:text-gray-500",
+    className: "text-gray-500 dark:text-gray-400",
   };
 }
 
@@ -131,7 +131,7 @@ export function AccountCard({
   const [editName, setEditName] = useState(account.name);
   const [resetCredits, setResetCredits] = useState<AccountResetCredits | null>(null);
   const [statsOpen, setStatsOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return account.is_active;
+    if (typeof window === "undefined") return false;
     try {
       const stored = window.localStorage.getItem(
         `${USAGE_STATS_OPEN_STORAGE_KEY_PREFIX}${account.id}`
@@ -140,7 +140,7 @@ export function AccountCard({
     } catch {
       // Fall back to default.
     }
-    return account.is_active;
+    return false;
   });
   const inputRef = useRef<HTMLInputElement>(null);
   const resetRequestSeq = useRef(0);
@@ -274,15 +274,16 @@ export function AccountCard({
 
   return (
     <div
-      className={`relative rounded-xl border p-5 transition-all duration-200 ${
+      data-active={account.is_active}
+      className={`account-card account-card--codex relative rounded-xl border p-4 transition-colors duration-150 ${
         account.is_active
           ? "bg-white dark:bg-gray-900 border-emerald-400 shadow-sm"
           : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
       }`}
     >
       {/* Header */}
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1 min-w-0">
+      <div className="account-card-header flex flex-wrap items-start justify-between gap-2 mb-3">
+        <div className="flex-1 min-w-40">
           <div className="flex items-center gap-2 mb-1">
             {account.is_active && (
               <span className="flex h-2 w-2">
@@ -300,8 +301,11 @@ export function AccountCard({
                 className="font-semibold text-gray-900 dark:text-gray-100 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded border border-gray-300 dark:border-gray-700 focus:outline-none focus:border-gray-500 dark:focus:border-gray-500 w-full"
               />
             ) : (
-              <h3
-                className="font-semibold text-gray-900 dark:text-gray-100 truncate cursor-pointer hover:text-gray-600 dark:hover:text-gray-300"
+              <h3 className="min-w-0 truncate">
+              <button
+                type="button"
+                disabled={masked}
+                className="account-identity max-w-full truncate text-left font-semibold text-gray-900 dark:text-gray-100 hover:text-gray-600 dark:hover:text-gray-300 focus-visible:outline-2 focus-visible:outline-offset-2"
                 onClick={() => {
                   if (masked) return;
                   setEditName(account.name);
@@ -310,31 +314,34 @@ export function AccountCard({
                 title={masked ? undefined : t("Click to rename")}
               >
                 <BlurredText blur={masked}>{account.name}</BlurredText>
+              </button>
               </h3>
             )}
           </div>
-          {account.email && (
+          {account.email && account.email !== account.name && (
             <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
               <BlurredText blur={masked}>{account.email}</BlurredText>
             </p>
           )}
         </div>
 
-        <div className="flex max-w-[60%] flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {/* Refresh */}
           <button
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors disabled:opacity-50"
+            className="p-1 text-gray-500 dark:text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors disabled:opacity-50"
+            aria-label={t("Refresh usage")}
             title={t("Refresh usage")}
           >
-            <span className={`inline-block h-4 w-4 text-base leading-none ${isRefreshing ? "animate-spin" : ""}`}>↻</span>
+            <svg className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.4 6.7M20 4v7h-7" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
           {/* Eye toggle */}
           {onToggleMask && (
             <button
               onClick={onToggleMask}
-              className="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+              className="p-1 text-gray-500 dark:text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+              aria-label={masked ? t("Show info") : t("Hide info")}
               title={masked ? t("Show info") : t("Hide info")}
             >
               {masked ? (
@@ -356,7 +363,7 @@ export function AccountCard({
               className={`p-1 transition-colors ${
                 autoSwitchExcluded
                   ? "text-gray-400/60 dark:text-gray-500/60 hover:text-gray-600 dark:hover:text-gray-300"
-                  : "text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                  : "text-gray-500 dark:text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
               }`}
               title={
                 autoSwitchExcluded
@@ -406,7 +413,7 @@ export function AccountCard({
 
       {/* Last refresh time */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs mb-3">
-        <div className="text-gray-400 dark:text-gray-500">
+        <div className="text-gray-500 dark:text-gray-400">
           {t("Last updated: {time}", { time: formatLastRefresh(lastRefresh) })}
         </div>
         {showSubscriptionStatus && (
@@ -417,19 +424,19 @@ export function AccountCard({
       </div>
 
       {/* Actions */}
-      <div className="flex gap-2 mt-3">
+      <div className="account-card-actions flex flex-wrap gap-2 mt-3">
         {account.is_active ? (
           <button
             disabled
             className="flex-1 px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 cursor-default"
           >
-            {t("✓ Active")}
+            <span className="inline-flex items-center gap-1.5"><svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m5 12 4 4L19 6" strokeLinecap="round" strokeLinejoin="round" /></svg>{t("✓ Active").replace(/^✓\s*/, "")}</span>
           </button>
         ) : (
           <button
             onClick={onSwitch}
             disabled={switching || switchDisabled}
-            className={`flex-1 flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            className={`account-primary-action flex-1 flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
               codexRunning
                 ? "bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-800 dark:text-blue-300"
                 : "bg-gray-900 hover:bg-gray-800 dark:bg-gray-100 dark:hover:bg-gray-200 text-white dark:text-gray-900"
@@ -454,9 +461,10 @@ export function AccountCard({
               ? "bg-amber-100 dark:bg-amber-900/30 text-amber-500 dark:text-amber-300"
               : "bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-700 dark:text-amber-300"
           }`}
+          aria-label={warmingUp ? t("Sending warm-up request...") : t("Send minimal warm-up request")}
           title={warmingUp ? t("Sending warm-up request...") : t("Send minimal warm-up request")}
         >
-          ⚡
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M13 3 5 14h7l-1 7 8-11h-7l1-7Z" strokeLinejoin="round" /></svg>
         </button>
         {onToggleAutoWarmup && (
           <button
@@ -476,7 +484,7 @@ export function AccountCard({
             }
           >
             <span className="flex items-center gap-1">
-              <span>♻</span>
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M4 7h14l-3-3m3 3-3 3M20 17H6l3 3m-3-3 3-3" strokeLinecap="round" strokeLinejoin="round" /></svg>
               <span>{autoWarmupLabel ?? (autoWarmupEnabled ? t("on") : t("off"))}</span>
             </span>
           </button>
@@ -488,6 +496,8 @@ export function AccountCard({
               ? "bg-indigo-50 dark:bg-indigo-900/20 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300"
               : "bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
           }`}
+          aria-expanded={statsOpen}
+          aria-label={statsOpen ? t("Hide usage statistics") : t("Show usage statistics")}
           title={statsOpen ? t("Hide usage statistics") : t("Show usage statistics")}
         >
           <svg
@@ -505,9 +515,10 @@ export function AccountCard({
         <button
           onClick={onDelete}
           className="px-3 py-2 text-sm rounded-lg bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-600 dark:text-red-300 transition-colors"
+          aria-label={t("Remove account")}
           title={t("Remove account")}
         >
-          ✕
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
       </div>
 

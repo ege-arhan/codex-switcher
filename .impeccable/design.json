@@ -1,0 +1,1277 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-12T19:40:11.768416+00:00",
+  "title": "Design System: Codex Switcher",
+  "extensions": {
+    "colorMeta": {
+      "macos-neutral-50": {
+        "role": "neutral",
+        "displayName": "macos neutral-50",
+        "tonalRamp": [
+          "#141419",
+          "#202027",
+          "#2e2e36",
+          "#41414b",
+          "#676773",
+          "#c8c8ce",
+          "#eeeeef",
+          "#f5f5f7"
+        ]
+      },
+      "macos-neutral-100": {
+        "role": "neutral",
+        "displayName": "macos neutral-100",
+        "tonalRamp": [
+          "#141419",
+          "#202027",
+          "#2e2e36",
+          "#41414b",
+          "#676773",
+          "#c8c8ce",
+          "#eeeeef",
+          "#f5f5f7"
+        ]
+      },
+      "macos-neutral-200": {
+        "role": "neutral",
+        "displayName": "macos neutral-200",
+        "tonalRamp": [
+          "#141419",
+          "#202027",
+          "#2e2e36",
+          "#41414b",
+          "#676773",
+          "#c8c8ce",
+          "#eeeeef",
+          "#f5f5f7"
+        ]
+      },
+      "macos-neutral-300": {
+        "role": "neutral",
+        "displayName": "macos neutral-300",
+        "tonalRamp": [
+          "#141419",
+          "#202027",
+          "#2e2e36",
+          "#41414b",
+          "#676773",
+          "#c8c8ce",
+          "#eeeeef",
+          "#f5f5f7"
+        ]
+      },
+      "macos-neutral-500": {
+        "role": "neutral",
+        "displayName": "macos neutral-500",
+        "tonalRamp": [
+          "#141419",
+          "#202027",
+          "#2e2e36",
+          "#41414b",
+          "#676773",
+          "#c8c8ce",
+          "#eeeeef",
+          "#f5f5f7"
+        ]
+      },
+      "macos-neutral-600": {
+        "role": "neutral",
+        "displayName": "macos neutral-600",
+        "tonalRamp": [
+          "#141419",
+          "#202027",
+          "#2e2e36",
+          "#41414b",
+          "#676773",
+          "#c8c8ce",
+          "#eeeeef",
+          "#f5f5f7"
+        ]
+      },
+      "macos-neutral-700": {
+        "role": "neutral",
+        "displayName": "macos neutral-700",
+        "tonalRamp": [
+          "#141419",
+          "#202027",
+          "#2e2e36",
+          "#41414b",
+          "#676773",
+          "#c8c8ce",
+          "#eeeeef",
+          "#f5f5f7"
+        ]
+      },
+      "macos-neutral-800": {
+        "role": "neutral",
+        "displayName": "macos neutral-800",
+        "tonalRamp": [
+          "#141419",
+          "#202027",
+          "#2e2e36",
+          "#41414b",
+          "#676773",
+          "#c8c8ce",
+          "#eeeeef",
+          "#f5f5f7"
+        ]
+      },
+      "macos-neutral-900": {
+        "role": "neutral",
+        "displayName": "macos neutral-900",
+        "tonalRamp": [
+          "#141419",
+          "#202027",
+          "#2e2e36",
+          "#41414b",
+          "#676773",
+          "#c8c8ce",
+          "#eeeeef",
+          "#f5f5f7"
+        ]
+      },
+      "macos-neutral-950": {
+        "role": "neutral",
+        "displayName": "macos neutral-950",
+        "tonalRamp": [
+          "#141419",
+          "#202027",
+          "#2e2e36",
+          "#41414b",
+          "#676773",
+          "#c8c8ce",
+          "#eeeeef",
+          "#f5f5f7"
+        ]
+      },
+      "macos-surface": {
+        "role": "neutral",
+        "displayName": "macos surface",
+        "tonalRamp": [
+          "#141419",
+          "#202027",
+          "#2e2e36",
+          "#41414b",
+          "#676773",
+          "#c8c8ce",
+          "#eeeeef",
+          "#f5f5f7"
+        ]
+      },
+      "macos-accent": {
+        "role": "primary",
+        "displayName": "macos interaction accent"
+      },
+      "windows-xp-neutral-50": {
+        "role": "neutral",
+        "displayName": "windows-xp neutral-50",
+        "tonalRamp": [
+          "#171711",
+          "#24231e",
+          "#302e27",
+          "#423f34",
+          "#6c675b",
+          "#b6b19b",
+          "#e5e2d1",
+          "#ece9d8"
+        ]
+      },
+      "windows-xp-neutral-100": {
+        "role": "neutral",
+        "displayName": "windows-xp neutral-100",
+        "tonalRamp": [
+          "#171711",
+          "#24231e",
+          "#302e27",
+          "#423f34",
+          "#6c675b",
+          "#b6b19b",
+          "#e5e2d1",
+          "#ece9d8"
+        ]
+      },
+      "windows-xp-neutral-200": {
+        "role": "neutral",
+        "displayName": "windows-xp neutral-200",
+        "tonalRamp": [
+          "#171711",
+          "#24231e",
+          "#302e27",
+          "#423f34",
+          "#6c675b",
+          "#b6b19b",
+          "#e5e2d1",
+          "#ece9d8"
+        ]
+      },
+      "windows-xp-neutral-300": {
+        "role": "neutral",
+        "displayName": "windows-xp neutral-300",
+        "tonalRamp": [
+          "#171711",
+          "#24231e",
+          "#302e27",
+          "#423f34",
+          "#6c675b",
+          "#b6b19b",
+          "#e5e2d1",
+          "#ece9d8"
+        ]
+      },
+      "windows-xp-neutral-500": {
+        "role": "neutral",
+        "displayName": "windows-xp neutral-500",
+        "tonalRamp": [
+          "#171711",
+          "#24231e",
+          "#302e27",
+          "#423f34",
+          "#6c675b",
+          "#b6b19b",
+          "#e5e2d1",
+          "#ece9d8"
+        ]
+      },
+      "windows-xp-neutral-600": {
+        "role": "neutral",
+        "displayName": "windows-xp neutral-600",
+        "tonalRamp": [
+          "#171711",
+          "#24231e",
+          "#302e27",
+          "#423f34",
+          "#6c675b",
+          "#b6b19b",
+          "#e5e2d1",
+          "#ece9d8"
+        ]
+      },
+      "windows-xp-neutral-700": {
+        "role": "neutral",
+        "displayName": "windows-xp neutral-700",
+        "tonalRamp": [
+          "#171711",
+          "#24231e",
+          "#302e27",
+          "#423f34",
+          "#6c675b",
+          "#b6b19b",
+          "#e5e2d1",
+          "#ece9d8"
+        ]
+      },
+      "windows-xp-neutral-800": {
+        "role": "neutral",
+        "displayName": "windows-xp neutral-800",
+        "tonalRamp": [
+          "#171711",
+          "#24231e",
+          "#302e27",
+          "#423f34",
+          "#6c675b",
+          "#b6b19b",
+          "#e5e2d1",
+          "#ece9d8"
+        ]
+      },
+      "windows-xp-neutral-900": {
+        "role": "neutral",
+        "displayName": "windows-xp neutral-900",
+        "tonalRamp": [
+          "#171711",
+          "#24231e",
+          "#302e27",
+          "#423f34",
+          "#6c675b",
+          "#b6b19b",
+          "#e5e2d1",
+          "#ece9d8"
+        ]
+      },
+      "windows-xp-neutral-950": {
+        "role": "neutral",
+        "displayName": "windows-xp neutral-950",
+        "tonalRamp": [
+          "#171711",
+          "#24231e",
+          "#302e27",
+          "#423f34",
+          "#6c675b",
+          "#b6b19b",
+          "#e5e2d1",
+          "#ece9d8"
+        ]
+      },
+      "windows-xp-surface": {
+        "role": "neutral",
+        "displayName": "windows-xp surface",
+        "tonalRamp": [
+          "#171711",
+          "#24231e",
+          "#302e27",
+          "#423f34",
+          "#6c675b",
+          "#b6b19b",
+          "#e5e2d1",
+          "#ece9d8"
+        ]
+      },
+      "windows-xp-accent": {
+        "role": "primary",
+        "displayName": "windows-xp interaction accent"
+      },
+      "windows-7-neutral-50": {
+        "role": "neutral",
+        "displayName": "windows-7 neutral-50",
+        "tonalRamp": [
+          "#101e29",
+          "#1d2d3c",
+          "#253b4e",
+          "#324c61",
+          "#526c82",
+          "#a1bfd4",
+          "#e2edf5",
+          "#eaf2f8"
+        ]
+      },
+      "windows-7-neutral-100": {
+        "role": "neutral",
+        "displayName": "windows-7 neutral-100",
+        "tonalRamp": [
+          "#101e29",
+          "#1d2d3c",
+          "#253b4e",
+          "#324c61",
+          "#526c82",
+          "#a1bfd4",
+          "#e2edf5",
+          "#eaf2f8"
+        ]
+      },
+      "windows-7-neutral-200": {
+        "role": "neutral",
+        "displayName": "windows-7 neutral-200",
+        "tonalRamp": [
+          "#101e29",
+          "#1d2d3c",
+          "#253b4e",
+          "#324c61",
+          "#526c82",
+          "#a1bfd4",
+          "#e2edf5",
+          "#eaf2f8"
+        ]
+      },
+      "windows-7-neutral-300": {
+        "role": "neutral",
+        "displayName": "windows-7 neutral-300",
+        "tonalRamp": [
+          "#101e29",
+          "#1d2d3c",
+          "#253b4e",
+          "#324c61",
+          "#526c82",
+          "#a1bfd4",
+          "#e2edf5",
+          "#eaf2f8"
+        ]
+      },
+      "windows-7-neutral-500": {
+        "role": "neutral",
+        "displayName": "windows-7 neutral-500",
+        "tonalRamp": [
+          "#101e29",
+          "#1d2d3c",
+          "#253b4e",
+          "#324c61",
+          "#526c82",
+          "#a1bfd4",
+          "#e2edf5",
+          "#eaf2f8"
+        ]
+      },
+      "windows-7-neutral-600": {
+        "role": "neutral",
+        "displayName": "windows-7 neutral-600",
+        "tonalRamp": [
+          "#101e29",
+          "#1d2d3c",
+          "#253b4e",
+          "#324c61",
+          "#526c82",
+          "#a1bfd4",
+          "#e2edf5",
+          "#eaf2f8"
+        ]
+      },
+      "windows-7-neutral-700": {
+        "role": "neutral",
+        "displayName": "windows-7 neutral-700",
+        "tonalRamp": [
+          "#101e29",
+          "#1d2d3c",
+          "#253b4e",
+          "#324c61",
+          "#526c82",
+          "#a1bfd4",
+          "#e2edf5",
+          "#eaf2f8"
+        ]
+      },
+      "windows-7-neutral-800": {
+        "role": "neutral",
+        "displayName": "windows-7 neutral-800",
+        "tonalRamp": [
+          "#101e29",
+          "#1d2d3c",
+          "#253b4e",
+          "#324c61",
+          "#526c82",
+          "#a1bfd4",
+          "#e2edf5",
+          "#eaf2f8"
+        ]
+      },
+      "windows-7-neutral-900": {
+        "role": "neutral",
+        "displayName": "windows-7 neutral-900",
+        "tonalRamp": [
+          "#101e29",
+          "#1d2d3c",
+          "#253b4e",
+          "#324c61",
+          "#526c82",
+          "#a1bfd4",
+          "#e2edf5",
+          "#eaf2f8"
+        ]
+      },
+      "windows-7-neutral-950": {
+        "role": "neutral",
+        "displayName": "windows-7 neutral-950",
+        "tonalRamp": [
+          "#101e29",
+          "#1d2d3c",
+          "#253b4e",
+          "#324c61",
+          "#526c82",
+          "#a1bfd4",
+          "#e2edf5",
+          "#eaf2f8"
+        ]
+      },
+      "windows-7-surface": {
+        "role": "neutral",
+        "displayName": "windows-7 surface",
+        "tonalRamp": [
+          "#101e29",
+          "#1d2d3c",
+          "#253b4e",
+          "#324c61",
+          "#526c82",
+          "#a1bfd4",
+          "#e2edf5",
+          "#eaf2f8"
+        ]
+      },
+      "windows-7-accent": {
+        "role": "primary",
+        "displayName": "windows-7 interaction accent"
+      },
+      "terminal-neutral-50": {
+        "role": "neutral",
+        "displayName": "terminal neutral-50",
+        "tonalRamp": [
+          "#050d07",
+          "#0b1b0e",
+          "#152b18",
+          "#30522d",
+          "#629e5d",
+          "#91c98c",
+          "#c9e9c7",
+          "#e0f5df"
+        ]
+      },
+      "terminal-neutral-100": {
+        "role": "neutral",
+        "displayName": "terminal neutral-100",
+        "tonalRamp": [
+          "#050d07",
+          "#0b1b0e",
+          "#152b18",
+          "#30522d",
+          "#629e5d",
+          "#91c98c",
+          "#c9e9c7",
+          "#e0f5df"
+        ]
+      },
+      "terminal-neutral-200": {
+        "role": "neutral",
+        "displayName": "terminal neutral-200",
+        "tonalRamp": [
+          "#050d07",
+          "#0b1b0e",
+          "#152b18",
+          "#30522d",
+          "#629e5d",
+          "#91c98c",
+          "#c9e9c7",
+          "#e0f5df"
+        ]
+      },
+      "terminal-neutral-300": {
+        "role": "neutral",
+        "displayName": "terminal neutral-300",
+        "tonalRamp": [
+          "#050d07",
+          "#0b1b0e",
+          "#152b18",
+          "#30522d",
+          "#629e5d",
+          "#91c98c",
+          "#c9e9c7",
+          "#e0f5df"
+        ]
+      },
+      "terminal-neutral-500": {
+        "role": "neutral",
+        "displayName": "terminal neutral-500",
+        "tonalRamp": [
+          "#050d07",
+          "#0b1b0e",
+          "#152b18",
+          "#30522d",
+          "#629e5d",
+          "#91c98c",
+          "#c9e9c7",
+          "#e0f5df"
+        ]
+      },
+      "terminal-neutral-600": {
+        "role": "neutral",
+        "displayName": "terminal neutral-600",
+        "tonalRamp": [
+          "#050d07",
+          "#0b1b0e",
+          "#152b18",
+          "#30522d",
+          "#629e5d",
+          "#91c98c",
+          "#c9e9c7",
+          "#e0f5df"
+        ]
+      },
+      "terminal-neutral-700": {
+        "role": "neutral",
+        "displayName": "terminal neutral-700",
+        "tonalRamp": [
+          "#050d07",
+          "#0b1b0e",
+          "#152b18",
+          "#30522d",
+          "#629e5d",
+          "#91c98c",
+          "#c9e9c7",
+          "#e0f5df"
+        ]
+      },
+      "terminal-neutral-800": {
+        "role": "neutral",
+        "displayName": "terminal neutral-800",
+        "tonalRamp": [
+          "#050d07",
+          "#0b1b0e",
+          "#152b18",
+          "#30522d",
+          "#629e5d",
+          "#91c98c",
+          "#c9e9c7",
+          "#e0f5df"
+        ]
+      },
+      "terminal-neutral-900": {
+        "role": "neutral",
+        "displayName": "terminal neutral-900",
+        "tonalRamp": [
+          "#050d07",
+          "#0b1b0e",
+          "#152b18",
+          "#30522d",
+          "#629e5d",
+          "#91c98c",
+          "#c9e9c7",
+          "#e0f5df"
+        ]
+      },
+      "terminal-neutral-950": {
+        "role": "neutral",
+        "displayName": "terminal neutral-950",
+        "tonalRamp": [
+          "#050d07",
+          "#0b1b0e",
+          "#152b18",
+          "#30522d",
+          "#629e5d",
+          "#91c98c",
+          "#c9e9c7",
+          "#e0f5df"
+        ]
+      },
+      "terminal-accent": {
+        "role": "primary",
+        "displayName": "terminal interaction accent"
+      },
+      "paper-neutral-50": {
+        "role": "neutral",
+        "displayName": "paper neutral-50",
+        "tonalRamp": [
+          "#1b1812",
+          "#28241b",
+          "#393225",
+          "#4d4433",
+          "#756952",
+          "#c4b79f",
+          "#eee7d9",
+          "#f5f0e5"
+        ]
+      },
+      "paper-neutral-100": {
+        "role": "neutral",
+        "displayName": "paper neutral-100",
+        "tonalRamp": [
+          "#1b1812",
+          "#28241b",
+          "#393225",
+          "#4d4433",
+          "#756952",
+          "#c4b79f",
+          "#eee7d9",
+          "#f5f0e5"
+        ]
+      },
+      "paper-neutral-200": {
+        "role": "neutral",
+        "displayName": "paper neutral-200",
+        "tonalRamp": [
+          "#1b1812",
+          "#28241b",
+          "#393225",
+          "#4d4433",
+          "#756952",
+          "#c4b79f",
+          "#eee7d9",
+          "#f5f0e5"
+        ]
+      },
+      "paper-neutral-300": {
+        "role": "neutral",
+        "displayName": "paper neutral-300",
+        "tonalRamp": [
+          "#1b1812",
+          "#28241b",
+          "#393225",
+          "#4d4433",
+          "#756952",
+          "#c4b79f",
+          "#eee7d9",
+          "#f5f0e5"
+        ]
+      },
+      "paper-neutral-500": {
+        "role": "neutral",
+        "displayName": "paper neutral-500",
+        "tonalRamp": [
+          "#1b1812",
+          "#28241b",
+          "#393225",
+          "#4d4433",
+          "#756952",
+          "#c4b79f",
+          "#eee7d9",
+          "#f5f0e5"
+        ]
+      },
+      "paper-neutral-600": {
+        "role": "neutral",
+        "displayName": "paper neutral-600",
+        "tonalRamp": [
+          "#1b1812",
+          "#28241b",
+          "#393225",
+          "#4d4433",
+          "#756952",
+          "#c4b79f",
+          "#eee7d9",
+          "#f5f0e5"
+        ]
+      },
+      "paper-neutral-700": {
+        "role": "neutral",
+        "displayName": "paper neutral-700",
+        "tonalRamp": [
+          "#1b1812",
+          "#28241b",
+          "#393225",
+          "#4d4433",
+          "#756952",
+          "#c4b79f",
+          "#eee7d9",
+          "#f5f0e5"
+        ]
+      },
+      "paper-neutral-800": {
+        "role": "neutral",
+        "displayName": "paper neutral-800",
+        "tonalRamp": [
+          "#1b1812",
+          "#28241b",
+          "#393225",
+          "#4d4433",
+          "#756952",
+          "#c4b79f",
+          "#eee7d9",
+          "#f5f0e5"
+        ]
+      },
+      "paper-neutral-900": {
+        "role": "neutral",
+        "displayName": "paper neutral-900",
+        "tonalRamp": [
+          "#1b1812",
+          "#28241b",
+          "#393225",
+          "#4d4433",
+          "#756952",
+          "#c4b79f",
+          "#eee7d9",
+          "#f5f0e5"
+        ]
+      },
+      "paper-neutral-950": {
+        "role": "neutral",
+        "displayName": "paper neutral-950",
+        "tonalRamp": [
+          "#1b1812",
+          "#28241b",
+          "#393225",
+          "#4d4433",
+          "#756952",
+          "#c4b79f",
+          "#eee7d9",
+          "#f5f0e5"
+        ]
+      },
+      "paper-surface": {
+        "role": "neutral",
+        "displayName": "paper surface",
+        "tonalRamp": [
+          "#1b1812",
+          "#28241b",
+          "#393225",
+          "#4d4433",
+          "#756952",
+          "#c4b79f",
+          "#eee7d9",
+          "#f5f0e5"
+        ]
+      },
+      "paper-accent": {
+        "role": "primary",
+        "displayName": "paper interaction accent"
+      },
+      "nord-neutral-50": {
+        "role": "neutral",
+        "displayName": "nord neutral-50",
+        "tonalRamp": [
+          "#2e3440",
+          "#3b4252",
+          "#434c5e",
+          "#4c566a",
+          "#8192aa",
+          "#bfc9d8",
+          "#e5e9f0",
+          "#eceff4"
+        ]
+      },
+      "nord-neutral-100": {
+        "role": "neutral",
+        "displayName": "nord neutral-100",
+        "tonalRamp": [
+          "#2e3440",
+          "#3b4252",
+          "#434c5e",
+          "#4c566a",
+          "#8192aa",
+          "#bfc9d8",
+          "#e5e9f0",
+          "#eceff4"
+        ]
+      },
+      "nord-neutral-200": {
+        "role": "neutral",
+        "displayName": "nord neutral-200",
+        "tonalRamp": [
+          "#2e3440",
+          "#3b4252",
+          "#434c5e",
+          "#4c566a",
+          "#8192aa",
+          "#bfc9d8",
+          "#e5e9f0",
+          "#eceff4"
+        ]
+      },
+      "nord-neutral-300": {
+        "role": "neutral",
+        "displayName": "nord neutral-300",
+        "tonalRamp": [
+          "#2e3440",
+          "#3b4252",
+          "#434c5e",
+          "#4c566a",
+          "#8192aa",
+          "#bfc9d8",
+          "#e5e9f0",
+          "#eceff4"
+        ]
+      },
+      "nord-neutral-500": {
+        "role": "neutral",
+        "displayName": "nord neutral-500",
+        "tonalRamp": [
+          "#2e3440",
+          "#3b4252",
+          "#434c5e",
+          "#4c566a",
+          "#8192aa",
+          "#bfc9d8",
+          "#e5e9f0",
+          "#eceff4"
+        ]
+      },
+      "nord-neutral-600": {
+        "role": "neutral",
+        "displayName": "nord neutral-600",
+        "tonalRamp": [
+          "#2e3440",
+          "#3b4252",
+          "#434c5e",
+          "#4c566a",
+          "#8192aa",
+          "#bfc9d8",
+          "#e5e9f0",
+          "#eceff4"
+        ]
+      },
+      "nord-neutral-700": {
+        "role": "neutral",
+        "displayName": "nord neutral-700",
+        "tonalRamp": [
+          "#2e3440",
+          "#3b4252",
+          "#434c5e",
+          "#4c566a",
+          "#8192aa",
+          "#bfc9d8",
+          "#e5e9f0",
+          "#eceff4"
+        ]
+      },
+      "nord-neutral-800": {
+        "role": "neutral",
+        "displayName": "nord neutral-800",
+        "tonalRamp": [
+          "#2e3440",
+          "#3b4252",
+          "#434c5e",
+          "#4c566a",
+          "#8192aa",
+          "#bfc9d8",
+          "#e5e9f0",
+          "#eceff4"
+        ]
+      },
+      "nord-neutral-900": {
+        "role": "neutral",
+        "displayName": "nord neutral-900",
+        "tonalRamp": [
+          "#2e3440",
+          "#3b4252",
+          "#434c5e",
+          "#4c566a",
+          "#8192aa",
+          "#bfc9d8",
+          "#e5e9f0",
+          "#eceff4"
+        ]
+      },
+      "nord-neutral-950": {
+        "role": "neutral",
+        "displayName": "nord neutral-950",
+        "tonalRamp": [
+          "#2e3440",
+          "#3b4252",
+          "#434c5e",
+          "#4c566a",
+          "#8192aa",
+          "#bfc9d8",
+          "#e5e9f0",
+          "#eceff4"
+        ]
+      },
+      "nord-accent": {
+        "role": "primary",
+        "displayName": "nord interaction accent"
+      },
+      "mono-neutral-50": {
+        "role": "neutral",
+        "displayName": "mono neutral-50",
+        "tonalRamp": [
+          "#000",
+          "#111",
+          "#242424",
+          "#353535",
+          "#606060",
+          "#b5b5b5",
+          "#ebebeb",
+          "#f4f4f4"
+        ]
+      },
+      "mono-neutral-100": {
+        "role": "neutral",
+        "displayName": "mono neutral-100",
+        "tonalRamp": [
+          "#000",
+          "#111",
+          "#242424",
+          "#353535",
+          "#606060",
+          "#b5b5b5",
+          "#ebebeb",
+          "#f4f4f4"
+        ]
+      },
+      "mono-neutral-200": {
+        "role": "neutral",
+        "displayName": "mono neutral-200",
+        "tonalRamp": [
+          "#000",
+          "#111",
+          "#242424",
+          "#353535",
+          "#606060",
+          "#b5b5b5",
+          "#ebebeb",
+          "#f4f4f4"
+        ]
+      },
+      "mono-neutral-300": {
+        "role": "neutral",
+        "displayName": "mono neutral-300",
+        "tonalRamp": [
+          "#000",
+          "#111",
+          "#242424",
+          "#353535",
+          "#606060",
+          "#b5b5b5",
+          "#ebebeb",
+          "#f4f4f4"
+        ]
+      },
+      "mono-neutral-500": {
+        "role": "neutral",
+        "displayName": "mono neutral-500",
+        "tonalRamp": [
+          "#000",
+          "#111",
+          "#242424",
+          "#353535",
+          "#606060",
+          "#b5b5b5",
+          "#ebebeb",
+          "#f4f4f4"
+        ]
+      },
+      "mono-neutral-600": {
+        "role": "neutral",
+        "displayName": "mono neutral-600",
+        "tonalRamp": [
+          "#000",
+          "#111",
+          "#242424",
+          "#353535",
+          "#606060",
+          "#b5b5b5",
+          "#ebebeb",
+          "#f4f4f4"
+        ]
+      },
+      "mono-neutral-700": {
+        "role": "neutral",
+        "displayName": "mono neutral-700",
+        "tonalRamp": [
+          "#000",
+          "#111",
+          "#242424",
+          "#353535",
+          "#606060",
+          "#b5b5b5",
+          "#ebebeb",
+          "#f4f4f4"
+        ]
+      },
+      "mono-neutral-800": {
+        "role": "neutral",
+        "displayName": "mono neutral-800",
+        "tonalRamp": [
+          "#000",
+          "#111",
+          "#242424",
+          "#353535",
+          "#606060",
+          "#b5b5b5",
+          "#ebebeb",
+          "#f4f4f4"
+        ]
+      },
+      "mono-neutral-900": {
+        "role": "neutral",
+        "displayName": "mono neutral-900",
+        "tonalRamp": [
+          "#000",
+          "#111",
+          "#242424",
+          "#353535",
+          "#606060",
+          "#b5b5b5",
+          "#ebebeb",
+          "#f4f4f4"
+        ]
+      },
+      "mono-neutral-950": {
+        "role": "neutral",
+        "displayName": "mono neutral-950",
+        "tonalRamp": [
+          "#000",
+          "#111",
+          "#242424",
+          "#353535",
+          "#606060",
+          "#b5b5b5",
+          "#ebebeb",
+          "#f4f4f4"
+        ]
+      },
+      "mono-surface": {
+        "role": "neutral",
+        "displayName": "mono surface",
+        "tonalRamp": [
+          "#000",
+          "#111",
+          "#242424",
+          "#353535",
+          "#606060",
+          "#b5b5b5",
+          "#ebebeb",
+          "#f4f4f4"
+        ]
+      },
+      "mono-accent": {
+        "role": "primary",
+        "displayName": "mono interaction accent"
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "headline",
+        "purpose": "Application, dialog and provider headings."
+      },
+      "title": {
+        "displayName": "title",
+        "purpose": "Account identity."
+      },
+      "body": {
+        "displayName": "body",
+        "purpose": "Actions, descriptions and fields."
+      },
+      "label": {
+        "displayName": "label",
+        "purpose": "Quota, status and timestamps."
+      },
+      "provider-tab": {
+        "displayName": "provider-tab",
+        "purpose": "Provider selector."
+      }
+    },
+    "shadows": [
+      {
+        "name": "provider-selected",
+        "value": "0 1px 2px #0000000a",
+        "purpose": "Selected provider segment."
+      },
+      {
+        "name": "xp-control",
+        "value": "inset 1px 1px #ffffff9c, inset -1px -1px #0000001a",
+        "purpose": "Period-theme controls, excluding account identity."
+      },
+      {
+        "name": "aero-card",
+        "value": "0 1px 3px #244d6b12",
+        "purpose": "Windows 7 cards."
+      },
+      {
+        "name": "paper-card",
+        "value": "0 2px 4px #4d443314",
+        "purpose": "Paper cards."
+      }
+    ],
+    "motion": [
+      {
+        "name": "card-state",
+        "value": "150ms",
+        "purpose": "Account card color and border state."
+      },
+      {
+        "name": "identity-mask",
+        "value": "200ms",
+        "purpose": "Privacy mask transition."
+      },
+      {
+        "name": "quota",
+        "value": "300ms",
+        "purpose": "Quota width transition."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "none",
+        "purpose": "Disable all transitions and animation when prefers-reduced-motion is reduce."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "appearance-single-column",
+        "value": "420px"
+      },
+      {
+        "name": "compact-toolbar",
+        "value": "640px"
+      },
+      {
+        "name": "toolbar-columns",
+        "value": "768px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Neutral primary account action; light-mode reference, with source-defined dark reversal.",
+      "html": "<button class=\"ds-primary\">Switch</button>",
+      "css": ".ds-primary {font-family:var(--app-font, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif); font-size:14px; line-height:20px; border-radius:var(--control-radius,7px); padding:8px 16px; cursor:pointer; color:var(--surface,#fff); background:var(--neutral-900,#202027); border:0; transition:background-color 150ms;} .ds-primary:hover {background:var(--neutral-800,#2e2e36);} .ds-primary:focus-visible { outline: 2px solid var(--accent, #006bd6); outline-offset: 3px; } .ds-primary:disabled {opacity:.5;cursor:not-allowed;}"
+    },
+    {
+      "name": "Secondary action",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Tonal dismissal or secondary action.",
+      "html": "<button class=\"ds-secondary\">Done</button>",
+      "css": ".ds-secondary {font-family:var(--app-font, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif); font-size:14px; line-height:20px; border-radius:var(--control-radius,7px); padding:8px 16px; cursor:pointer; background:var(--neutral-100,#eeeeef);color:var(--neutral-700,#41414b);border:0;} .ds-secondary:hover {background:var(--neutral-200,#dedee2);} .ds-secondary:focus-visible { outline: 2px solid var(--accent, #006bd6); outline-offset: 3px; } .ds-secondary:disabled {opacity:.5;}"
+    },
+    {
+      "name": "Claude outlined action",
+      "kind": "button",
+      "refersTo": "button-claude",
+      "description": "Outlined provider action with its own focus accent.",
+      "html": "<button class=\"ds-claude\">Open Claude Code</button>",
+      "css": ".ds-claude {font-family:var(--app-font, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif); font-size:14px; line-height:20px; border-radius:var(--control-radius,7px); padding:8px 16px; cursor:pointer; padding:8px 12px;background:transparent;border:1px solid var(--neutral-300,#c8c8ce);color:var(--neutral-800,#2e2e36);font-weight:500;} .ds-claude:hover {background:var(--neutral-100,#eeeeef);} .ds-claude:focus-visible {outline:2px solid #d97757;outline-offset:2px;} .ds-claude:disabled {opacity:.5;}"
+    },
+    {
+      "name": "Settings field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Labeled settings input with visible keyboard focus.",
+      "html": "<label class=\"ds-field-label\">Resume prompt<input class=\"ds-field\" value=\"Continue\" /></label>",
+      "css": ".ds-field-label {display:grid;gap:4px;font:500 12px/16px var(--app-font,sans-serif);color:var(--neutral-900,#202027);} .ds-field {font:400 14px/20px var(--app-font,sans-serif);padding:8px 12px;background:var(--surface,#fff);color:var(--neutral-900,#202027);border:1px solid var(--neutral-300,#c8c8ce);border-radius:var(--control-radius,7px);} .ds-field:hover {border-color:var(--neutral-500,#676773);} .ds-field:focus-visible { outline: 2px solid var(--accent, #006bd6); outline-offset: 3px; }"
+    },
+    {
+      "name": "Provider navigation",
+      "kind": "nav",
+      "refersTo": "provider-tab",
+      "description": "Pressed-state navigation; dark and special-theme color treatments remain in App.css.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Accounts\"><button aria-pressed=\"true\">Codex</button><button aria-pressed=\"false\">Claude</button></nav>",
+      "css": ".ds-nav {display:flex;width:fit-content;gap:3px;padding:3px;background:var(--neutral-200,#dedee2);border-radius:var(--control-radius,7px);}.ds-nav button {font:600 13px/20px var(--app-font,sans-serif);padding:7px 18px;border:1px solid transparent;border-radius:var(--control-radius,7px);color:var(--neutral-900,#202027);background:transparent;cursor:pointer;}.ds-nav button[aria-pressed=\"true\"] {background:var(--surface,#fff);border-color:var(--neutral-300,#c8c8ce);box-shadow:0 1px 2px #0000000a;}.ds-nav button:focus-visible { outline: 2px solid var(--accent, #006bd6); outline-offset: 3px; }"
+    },
+    {
+      "name": "Account card",
+      "kind": "card",
+      "refersTo": "account-card",
+      "description": "Neutral account container with anonymous identity and supporting timestamp.",
+      "html": "<article class=\"ds-card\"><h3>Account name</h3><p>Last updated: Just now</p></article>",
+      "css": ".ds-card {padding:16px;background:var(--surface,#fff);border:1px solid var(--neutral-200,#dedee2);border-radius:var(--radius,12px);font-family:var(--app-font,sans-serif);font-variant-numeric:tabular-nums;}.ds-card h3 {margin:0;color:var(--neutral-900,#202027);font-size:16px;line-height:24px;font-weight:600;}.ds-card p {margin:12px 0 0;color:var(--neutral-500,#676773);font-size:12px;line-height:16px;}.ds-card:hover {border-color:var(--neutral-300,#c8c8ce);}"
+    },
+    {
+      "name": "Claude plan badge",
+      "kind": "chip",
+      "refersTo": "plan-badge",
+      "description": "Bordered provider plan chip; dark mode uses a light orange label.",
+      "html": "<span class=\"ds-plan\">Pro</span>",
+      "css": ".ds-plan {display:inline-block;padding:4px 8px;border:1px solid #d97757;border-radius:9999px;font:500 12px/16px var(--app-font,sans-serif);color:#7c2d12;}"
+    },
+    {
+      "name": "Remaining quota",
+      "kind": "custom",
+      "refersTo": "quota-track",
+      "description": "Anonymous Claude quota example; production thresholds replace healthy color with amber or red.",
+      "html": "<div class=\"ds-quota\"><div class=\"ds-quota-copy\"><span>5h limit</span><span>70% left</span></div><div class=\"ds-quota-track\" role=\"progressbar\" aria-label=\"5h remaining\" aria-valuemin=\"0\" aria-valuemax=\"100\" aria-valuenow=\"70\"><div class=\"ds-quota-fill\"></div></div></div>",
+      "css": ".ds-quota {font:400 12px/16px var(--app-font,sans-serif);color:var(--neutral-500,#676773);font-variant-numeric:tabular-nums;}.ds-quota-copy {display:flex;justify-content:space-between;margin-bottom:4px;}.ds-quota-track {height:6px;border-radius:9999px;overflow:hidden;background:var(--neutral-100,#eeeeef);}.ds-quota-fill {height:100%;width:70%;background:#d97757;transition:width 300ms;} @media(prefers-reduced-motion:reduce){.ds-quota-fill{transition:none;}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Familiar desktop utility",
+    "overview": "Identity, verified remaining quota and the next action establish the hierarchy. The default macOS presentation uses quiet surfaces and system typography, with compact controls and aligned account rows. This is an operational desktop utility inside Tauri, with a React interface.\n\nWindows XP, Windows 7, Terminal, Paper, Nord and Mono are alternate presentations of the same controls. Theme selection changes the neutral ramp, accent, font and geometry together. It does not change account behavior. The user's explicit familiar OS direction permits system fonts and authentic period chrome.",
+    "keyCharacteristics": [
+      "Identity before actions; remaining quota before advanced detail.",
+      "Seven coordinated themes with a shared component structure.",
+      "Provider accents and labeled status remain independent of theme accents.",
+      "Turkish and English labels, wrapping actions and tabular account numerals."
+    ],
+    "rules": [
+      {
+        "name": "Theme Together",
+        "body": "Apply the selected neutral ramp, font, radii and accent as one presentation; Terminal and Nord also select dark mode.",
+        "section": "colors"
+      },
+      {
+        "name": "Provider and State",
+        "body": "Keep provider identity distinct from quota warning and error states; accompany status color with a label or numerical value.",
+        "section": "colors"
+      },
+      {
+        "name": "Utility Hierarchy",
+        "body": "Reserve emphasis for identity, dialog titles and actionable state; keep percentages and reset times readable alongside their labels.",
+        "section": "typography"
+      },
+      {
+        "name": "Period Chrome",
+        "body": "Keep the existing XP and Aero gradients and bevels in their period themes; use the other themes' own flat or tonal materials elsewhere.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** switch theme tokens together and preserve provider and warning semantics.",
+      "**Do** keep identity, remaining quota and the next action visible before advanced settings.",
+      "**Do** preserve visible keyboard focus, explicit status labels and locale-aware values.",
+      "**Do** allow action rows and translated copy to wrap inside the shared content width."
+    ],
+    "donts": [
+      "**Don't** spread XP or Aero chrome into the other themes.",
+      "**Don't** frame the account identity as an XP or Aero command button.",
+      "**Don't** infer verified quota from a loading or unknown state.",
+      "**Don't** use real account identities or credentials in documentation examples."
+    ]
+  }
+}

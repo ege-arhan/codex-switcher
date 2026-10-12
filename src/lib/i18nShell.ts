@@ -1,4 +1,6 @@
 export const shellTranslations: Record<string, string> = {
+  "Themes": "Temalar", "Accounts": "Hesaplar",
+  "No Plus-or-higher account has verified remaining quota. Waiting for limits to reset; automatic switching will retry.": "Plus veya üstü hesaplarda doğrulanmış kalan limit yok. Limit yenilenmesi bekleniyor; otomatik geçiş tekrar denenecek.",
   "Select auth.json file": "auth.json dosyasını seç", "Export Full Encrypted Account Config": "Tam şifreli hesap yapılandırmasını dışa aktar", "Codex Switcher Full Backup": "Codex Switcher tam yedeği", "Import Full Encrypted Account Config": "Tam şifreli hesap yapılandırmasını içe aktar", "No file selected": "Dosya seçilmedi", "Request failed with status {status}": "İstek başarısız (durum: {status})",
   "Switched to '{name}' and started continuations in {count} desktop sessions": "'{name}' hesabına geçildi ve {count} masaüstü oturumunda devam başlatıldı",
   "Switched to account '{name}' and resumed session in-place with '{phrase}'": "'{name}' hesabına geçildi ve mevcut oturuma '{phrase}' mesajıyla devam edildi",

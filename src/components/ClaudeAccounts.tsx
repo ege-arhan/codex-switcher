@@ -15,6 +15,7 @@ interface ClaudeProfile {
     email: string;
     is_default: boolean;
     logged_in: boolean;
+    plan_type: string | null;
     last_warmup_at: number | null;
     desktop_status: "saved" | "login_required" | "different_account" | "unavailable";
     usage: ClaudeUsage | null;
@@ -26,6 +27,7 @@ interface ClaudeProfiles {
     active_desktop_id: string | null;
     auto_switch_enabled: boolean;
     auto_warmup_enabled: boolean;
+    waiting_for_quota: boolean;
 }
 interface ClaudeLogin {
     flow_id: string;
@@ -64,7 +66,8 @@ export function ClaudeAccounts() {
         void load();
         const reload = () => { void load(); };
         window.addEventListener("focus", reload);
-        return () => window.removeEventListener("focus", reload);
+        const timer = window.setInterval(reload, 15000);
+        return () => { window.clearInterval(timer); window.removeEventListener("focus", reload); };
     }, [desktop, load]);
     useEffect(() => {
         if (adding || desktopTarget)
@@ -201,10 +204,10 @@ export function ClaudeAccounts() {
     const loginProfile = store?.profiles.find(p => p.id === login?.profile_id);
     if (!desktop)
         return null;
-    return (<section aria-labelledby="claude-accounts-title" className="mb-8 rounded-xl border border-[#d97757]/60 bg-white p-5 dark:border-[#d97757]/70 dark:bg-gray-900">
+    return (<section aria-labelledby="claude-accounts-title" className="provider-section provider-section--claude space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 id="claude-accounts-title" className="text-lg font-semibold text-[#a54f36] dark:text-[#e6a28a]">{t("Claude accounts")}</h2>
+          <h2 id="claude-accounts-title" className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t("Claude accounts")}</h2>
           <p className="text-sm text-gray-600 dark:text-gray-300">{t("Manage Claude Code and Claude Desktop sign-ins.")}</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -213,33 +216,44 @@ export function ClaudeAccounts() {
           <button className={button} disabled={busy || !store} onClick={() => { setError(null); setEmail(""); setLogin(null); setAdding(true); }}>{t("Add account")}</button>
         </div>
       </div>
-      <label className="mt-4 flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-gray-100">
+      <div className="automation-controls grid gap-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900 sm:grid-cols-2">
+      <div>
+      <label className="flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-gray-100">
         <input type="checkbox" checked={store?.auto_switch_enabled ?? false} disabled={busy || !store} onChange={(e) => void action("set_claude_auto_switch", { enabled: e.target.checked })}/>
         {t("Claude Code auto-switch")}
       </label>
-      <label className="mt-3 flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-gray-100">
+      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{t("Auto-switch uses only verified Pro, Max, Team or Enterprise accounts with remaining usage.")}</p>
+      </div>
+      <div>
+      <label className="flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-gray-100">
         <input type="checkbox" checked={store?.auto_warmup_enabled ?? false} disabled={busy || !store} onChange={e => void action("set_claude_auto_warmup", { enabled: e.target.checked })}/>
         {t("Claude auto warm-up")}
       </label>
       <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{t("Warm-up sends a minimal request when an unused usage window resets.")}</p>
+      </div>
+      <details className="sm:col-span-2 border-t border-gray-200 pt-3 dark:border-gray-700">
+      <summary className="cursor-pointer text-sm font-medium text-gray-700 dark:text-gray-200">{t("Project and switching details")}</summary>
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
         <span className="break-all">{t("Project: {directory}", { directory: cwd || t("Home directory") })}</span>
         <button className={button} disabled={busy} onClick={() => void chooseProject()}>{t("Choose project folder")}</button>
         {cwd && <button className={button} disabled={busy} onClick={() => { localStorage.removeItem("claude-project-directory"); setCwd(""); }}>{t("Home directory")}</button>}
       </div>
       <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">{t("When a managed terminal reaches its limit, switch to an account with verified remaining usage and resume the same local chat. Desktop cloud chats stay with their account.")}</p>
+      </details>
+      </div>
+      {store?.auto_switch_enabled && store.waiting_for_quota && <p role="status" className="mt-3 rounded-lg border border-[#d97757] p-3 text-sm text-orange-900 dark:text-orange-100">{t("No paid Claude account has verified remaining usage. Waiting for limits to reset; accounts are checked every 30 seconds.")}</p>}
       {error && <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">{localizeMessage(error)}</p>}
       {store?.profiles.length === 0 && <p className="mt-4 text-sm text-gray-600 dark:text-gray-300">{t("Import your current Claude Code account, then generate a login link for another account.")}</p>}
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        {store?.profiles.map((p) => (<article key={p.id} className={`rounded-xl border bg-white p-5 dark:bg-gray-900 ${store.active_code_id === p.id ? "border-[#d97757]" : "border-gray-200 dark:border-gray-700"}`}>
-            <h3 className="break-all font-semibold text-gray-900 dark:text-gray-100">{p.email}</h3>
+      <div className="account-list grid gap-3">
+        {store?.profiles.map((p) => (<article key={p.id} data-active={store.active_code_id === p.id} className={`account-card account-card--claude rounded-xl border bg-white p-4 dark:bg-gray-900 ${store.active_code_id === p.id ? "border-[#d97757]" : "border-gray-200 dark:border-gray-700"}`}>
+            <div className="account-card-header flex flex-wrap items-center justify-between gap-2">
+              <h3 className="break-all font-semibold text-gray-900 dark:text-gray-100">{p.email}</h3>
+              <span className="rounded-full border border-[#d97757] px-2 py-1 text-xs font-medium text-orange-900 dark:text-orange-100">{({pro: "Pro", max: "Max", team: "Team", enterprise: "Enterprise", free: t("Free")} as Record<string, string>)[p.plan_type ?? ""] ?? t("Unknown plan")}</span>
+            </div>
             <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
               {p.logged_in ? t("Code sign-in verified") : t("Code sign-in required")}
               {store.active_code_id === p.id && t(" \u00B7 Selected Code account")}
               {store.active_desktop_id === p.id && t(" \u00B7 Selected Desktop profile")}
-            </p>
-            <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
-              {p.desktop_status === "saved" ? t("Desktop: saved account profile") : p.desktop_status === "different_account" ? t("Desktop: signed in with another account") : t("Desktop: separate sign-in required")}
             </p>
             <div className="mt-3 space-y-2">
               {p.usage ? <>
@@ -248,14 +262,22 @@ export function ClaudeAccounts() {
               </> : <p className="text-xs text-gray-500 dark:text-gray-400">{t("Remaining usage has not been verified yet")}</p>}
             </div>
             {p.usage && <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{t("Last checked: {time}", { time: new Date(p.usage.checked_at * 1000).toLocaleTimeString(locale) })}</p>}
-            {p.last_warmup_at && <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{t("Last warm-up: {time}", { time: new Date(p.last_warmup_at * 1000).toLocaleString(locale) })}</p>}
             {p.error && <p className="mt-2 text-xs text-red-700 dark:text-red-300">{localizeMessage(p.error)}</p>}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button className={button} disabled={busy || !p.logged_in || !mac} title={t("Open Claude Code in Terminal with this account")} onClick={() => void openCode(p)}>{t("Open Claude Code")}</button>
+            <div className="account-card-actions mt-3 flex flex-wrap gap-2">
+              <button className={`${button} account-primary-action`} disabled={busy || !p.logged_in || !mac} title={t("Open Claude Code in Terminal with this account")} onClick={() => void openCode(p)}>{t("Open Claude Code")}</button>
               <button className={button} disabled={busy || !mac} onClick={() => { setError(null); setDesktopTarget(p); }}>{p.desktop_status === "saved" ? t("Switch Desktop") : t("Desktop sign-in")}</button>
-<button className={button} disabled={busy || !p.logged_in} onClick={() => void action("warmup_claude_account", { profileId: p.id })}>{t("Warm up")}</button>
-              {!p.is_default && <button className={button} disabled={busy} onClick={() => { setError(null); setEmail(p.email); setLogin(null); setAdding(true); }}>{t("Code login link")}</button>}
             </div>
+            <details className="mt-3 border-t border-gray-200 pt-3 dark:border-gray-700">
+              <summary className="cursor-pointer text-xs font-medium text-gray-600 dark:text-gray-300">{t("Account details and sign-in")}</summary>
+            <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
+              {p.desktop_status === "saved" ? t("Desktop: saved account profile") : p.desktop_status === "different_account" ? t("Desktop: signed in with another account") : t("Desktop: separate sign-in required")}
+            </p>
+            {p.last_warmup_at && <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{t("Last warm-up: {time}", { time: new Date(p.last_warmup_at * 1000).toLocaleString(locale) })}</p>}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button className={button} disabled={busy || !p.logged_in} onClick={() => void action("warmup_claude_account", { profileId: p.id })}>{t("Warm up")}</button>
+              {!p.is_default && <button className={button} disabled={busy} onClick={() => { setError(null); setEmail(p.email); setLogin(null); setAdding(true); }}>{t("Code login link")}</button>}
+              </div>
+            </details>
           </article>))}
       </div>
       <dialog ref={dialog} aria-labelledby="claude-dialog-title" onCancel={(e) => { e.preventDefault(); void closeDialog(); }} className="m-auto w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-6 text-gray-900 shadow-xl backdrop:bg-black/50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">

@@ -212,6 +212,7 @@ function App() {
   const [isWarmingAll, setIsWarmingAll] = useState(false);
   const [warmingUpId, setWarmingUpId] = useState<string | null>(null);
   const [refreshSuccess, setRefreshSuccess] = useState(false);
+  const [quotaWaiting, setQuotaWaiting] = useState<string | null>(null);
   const [warmupToast, setWarmupToast] = useState<{
     message: string;
     isError: boolean;
@@ -292,6 +293,7 @@ function App() {
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
   const navMenuRef = useRef<HTMLDivElement | null>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>(readStoredTheme);
+  const [provider, setProvider] = useState<"codex" | "claude">("codex");
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const [closeBehaviorPromptOpen, setCloseBehaviorPromptOpen] = useState(false);
   const [closeBehaviorDontAskAgain, setCloseBehaviorDontAskAgain] = useState(false);
@@ -671,6 +673,11 @@ function App() {
       const stop = await listen<{ message: string; event_type: string }>(
         "session-recovery-event",
         (event) => {
+          if (event.payload.event_type === "quota_waiting") {
+            setQuotaWaiting(event.payload.message);
+            showWarmupToast(localizeMessage(event.payload.message), true);
+            return;
+          }
           if (event.payload.event_type === "recovery_failed") {
             showWarmupToast(localizeMessage(event.payload.message), true);
             return;
@@ -681,6 +688,7 @@ function App() {
             event.payload.event_type === "account_switched_queued" ||
             event.payload.event_type === "reset_credit_redeemed"
           ) {
+            setQuotaWaiting(null);
             showWarmupToast(localizeMessage(event.payload.message));
             void loadAccounts(true).then((accountList) => {
               if (accountList && accountList.length > 0) {
@@ -1431,9 +1439,9 @@ function App() {
     visibleOtherAccounts.length === 0;
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
-      <header className="sticky top-0 z-40 border-b border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-        <div className="flex h-9 items-center bg-white px-3 dark:bg-gray-900">
+    <div className="app-shell min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
+      <header className="app-header sticky top-0 z-40 border-b border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+        <div className="window-titlebar flex h-9 items-center bg-white px-3 dark:bg-gray-900">
           <div
             onMouseDown={handleTitlebarDrag}
             onDoubleClick={handleTitlebarDoubleClick}
@@ -1485,15 +1493,15 @@ function App() {
           )}
         </div>
 
-        <div className="max-w-5xl mx-auto px-6 py-4">
+        <div className="app-toolbar max-w-5xl mx-auto px-6 py-3">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_max-content] md:items-center md:gap-4">
             <div className="flex items-center gap-3 min-w-0 flex-1">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 tracking-tight">
+                  <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 tracking-tight">
                     Codex Switcher
                   </h1>
-                  {isTauriRuntime() && <button
+                  {isTauriRuntime() && provider === "codex" && <button
                     type="button"
                     role="switch"
                     aria-label={t("Automatic account switching on usage limit")}
@@ -1522,7 +1530,7 @@ function App() {
                     <span className="select-none"> {t("Auto-switch")} {appSettings ? (appSettings.auto_switch_limit_enabled ? t("On") : t("Off")) : "…"}
                     </span>
                   </button>}
-                  {processInfo && (
+                  {processInfo && provider === "codex" && (
                     <div className="inline-flex items-center gap-1">
                       <span
                         className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs border ${hasRunningProcesses
@@ -1551,7 +1559,7 @@ function App() {
                       )}
                     </div>
                   )}
-                  {isTauriRuntime() && processInfo && !hasRunningProcesses && (
+                  {isTauriRuntime() && provider === "codex" && processInfo && !hasRunningProcesses && (
                     <button
                       onClick={handleOpenCodexApp}
                       disabled={isOpeningCodex || isCompletingForceClose || switchingId !== null}
@@ -1566,9 +1574,11 @@ function App() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0 md:ml-4 md:w-max md:flex-nowrap md:justify-end">
+              {provider === "codex" && <>
               <button
                 onClick={toggleMaskAll}
                 className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 shrink-0"
+                aria-label={allMasked ? t("Show all account names and emails") : t("Hide all account names and emails")}
                 title={allMasked ? t("Show all account names and emails") : t("Hide all account names and emails")}
               >
                 {allMasked ? (
@@ -1591,9 +1601,10 @@ function App() {
                 onClick={handleRefresh}
                 disabled={isRefreshing}
                 className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100 text-gray-700 transition-colors hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 shrink-0"
+                aria-label={t("Refresh all usage")}
                 title={isRefreshing ? t("Refreshing all usage") : t("Refresh all usage")}
               >
-                <span className={isRefreshing ? "animate-spin inline-block" : ""}>↻</span>
+                <svg aria-hidden="true" className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
               <button
                 onClick={() => void handleWarmupAll()}
@@ -1603,9 +1614,10 @@ function App() {
                     ? "bg-amber-100 text-amber-500 dark:bg-amber-900/30 dark:text-amber-300"
                     : "bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/40"
                 }`}
+                aria-label={t("Warm up all accounts")}
                 title={isWarmingAll ? t("Warming up all accounts") : t("Warm up all accounts")}
               >
-                <span className={isWarmingAll ? "animate-pulse" : ""}>⚡</span>
+                <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m13 3-8 11h6l-1 7 9-12h-6l1-6Z" strokeLinejoin="round"/></svg>
               </button>
               {isAccountSearchEnabled && (
                 <button
@@ -1703,13 +1715,13 @@ function App() {
                     <button
                       onClick={() => {
                         setIsNavMenuOpen(false);
-                        setThemeMode((prev) => (prev === "dark" ? "light" : "dark"));
+                        setIsSettingsOpen(true);
                       }}
                       className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-gray-100 dark:text-white dark:hover:bg-neutral-900"
                     >
                       <span>{t("Appearance")}</span>
                       <span className="text-[11px] text-gray-400 dark:text-gray-500">
-                        {themeMode === "dark" ? `☾ ${t("Dark")}` : `☀ ${t("Light")}`}
+                        {t("Themes")}
                       </span>
                     </button>
                   </div>
@@ -1768,7 +1780,9 @@ function App() {
                   </div>
                 )}
               </div>
-              <div className="relative" ref={actionsMenuRef}>
+              </>}
+              <button type="button" className="settings-trigger h-10 rounded-lg border border-gray-300 px-3 text-sm dark:border-gray-700" onClick={() => setIsSettingsOpen(true)}>{t("Settings")}</button>
+              <div className={provider === "claude" ? "hidden" : "relative"} ref={actionsMenuRef}>
                 <button
                   onClick={() => setIsActionsMenuOpen((prev) => !prev)}
                   className="h-10 px-4 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white transition-colors hover:bg-gray-800 dark:bg-black dark:hover:bg-neutral-900 shrink-0 whitespace-nowrap"
@@ -1834,7 +1848,13 @@ function App() {
 
       {/* Main Content */}
       <main className="max-w-5xl mx-auto px-6 pt-4 pb-8">
-        <ClaudeAccounts />
+        {quotaWaiting && <p role="status" className="mb-4 rounded-lg border border-amber-500 p-3 text-sm text-amber-900 dark:text-amber-200">{localizeMessage(quotaWaiting)}</p>}
+        <nav aria-label={t("Accounts")} className="provider-nav mb-5 flex gap-1 border-b border-gray-200 dark:border-gray-800">
+          <button type="button" aria-pressed={provider === "codex"} onClick={() => setProvider("codex")} className="provider-tab px-4 py-2.5 text-sm font-semibold">Codex <span className="ml-1 text-xs tabular-nums">{accounts.length}</span></button>
+          <button type="button" aria-pressed={provider === "claude"} onClick={() => setProvider("claude")} className="provider-tab px-4 py-2.5 text-sm font-semibold">Claude</button>
+        </nav>
+        <div hidden={provider !== "claude"}><ClaudeAccounts /></div>
+        <div hidden={provider !== "codex"}>
         {loading && accounts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20">
             <div className="animate-spin h-10 w-10 border-2 border-gray-900 dark:border-gray-100 border-t-transparent rounded-full mb-4"></div>
@@ -1848,7 +1868,7 @@ function App() {
         ) : accounts.length === 0 ? (
           <div className="text-center py-20">
             <div className="h-16 w-16 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-4">
-              <span className="text-3xl">👤</span>
+              <svg aria-hidden="true" className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>
             </div>
             <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2"> {t("No accounts yet")} </h2>
             <p className="text-gray-500 dark:text-gray-400 mb-6"> {t("Add your first Codex account to get started")} </p>
@@ -1916,7 +1936,7 @@ function App() {
             {activeAccount &&
               matchesAccountSearch(activeAccount, normalizedAccountSearchQuery) && (
                 <section>
-                  <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4"> {t("Active Account")} </h2>
+                  <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3"> {t("Active Account")} </h2>
                   <AccountCard
                     account={activeAccount}
                     onSwitch={() => { }}
@@ -1964,7 +1984,7 @@ function App() {
             {visibleOtherAccounts.length > 0 && (
               <section>
                 <div className="flex items-center justify-between gap-3 mb-4">
-                  <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
                     {normalizedAccountSearchQuery
                       ? t("Other Accounts ({shown} of {total})", { shown: visibleOtherAccounts.length, total: otherAccounts.length })
                       : t("Other Accounts ({count})", { count: visibleOtherAccounts.length })}
@@ -1986,7 +2006,7 @@ function App() {
                               | "subscription_desc"
                           )
                         }
-                        className="appearance-none font-sans text-xs sm:text-sm font-medium pl-3 pr-9 py-2 rounded-xl border border-gray-300 dark:border-gray-700 bg-gradient-to-b from-white to-gray-50 dark:from-gray-900 dark:to-gray-800 text-gray-700 dark:text-gray-200 shadow-sm hover:border-gray-400 dark:hover:border-gray-600 hover:shadow focus:outline-none focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600 focus:border-gray-400 dark:focus:border-gray-600 transition-all"
+                        className="appearance-none font-sans text-xs sm:text-sm font-medium pl-3 pr-9 py-2 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 shadow-sm hover:border-gray-400 dark:hover:border-gray-600 hover:shadow focus:outline-none focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600 focus:border-gray-400 dark:focus:border-gray-600 transition-all"
                       >
                         <option value="deadline_asc">{t("Reset: earliest to latest")}</option>
                         <option value="deadline_desc">{t("Reset: latest to earliest")}</option>
@@ -2009,7 +2029,7 @@ function App() {
                     </div>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="account-list grid grid-cols-1 gap-3">
                   {visibleOtherAccounts.map((account) => (
                     <AccountCard
                       key={account.id}
@@ -2056,6 +2076,7 @@ function App() {
             )}
           </div>
         )}
+        </div>
       </main>
 
       {/* Refresh Success Toast */}
@@ -2084,6 +2105,8 @@ function App() {
 
       {isSettingsOpen && (
         <SettingsModal
+          themeMode={themeMode}
+          onThemeChange={setThemeMode}
           reopenPreference={desktopReopen.preference}
           onReopenPreferenceChange={saveDesktopReopenPreference}
           closePreference={codexClose.preference}

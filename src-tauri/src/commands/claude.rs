@@ -37,6 +37,8 @@ pub struct ClaudeProfile {
     #[serde(default)]
     pub logged_in: bool,
     #[serde(default)]
+    pub plan_type: Option<String>,
+    #[serde(default)]
     pub last_warmup_at: Option<i64>,
     #[serde(default)]
     pub usage: Option<ClaudeUsage>,
@@ -53,6 +55,8 @@ pub struct ClaudeProfiles {
     pub auto_switch_enabled: bool,
     #[serde(default)]
     pub auto_warmup_enabled: bool,
+    #[serde(default, skip_deserializing)]
+    pub waiting_for_quota: bool,
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -408,8 +412,20 @@ async fn fetch_usage(p: &ClaudeProfile) -> Result<ClaudeUsage> {
     bail!("Claude usage could not be verified")
 }
 
+fn verified_plan(status: &Value) -> Option<String> {
+    status
+        .get("subscriptionType")
+        .and_then(Value::as_str)
+        .map(|s| s.to_ascii_lowercase())
+}
+
+fn paid_plan(plan: Option<&str>) -> bool {
+    matches!(plan, Some("pro" | "max" | "team" | "enterprise"))
+}
+
 fn eligible(p: &ClaudeProfile, tried: &HashSet<String>, now: i64) -> bool {
     p.logged_in
+        && paid_plan(p.plan_type.as_deref())
         && p.error.is_none()
         && !tried.contains(&p.id)
         && p.usage.as_ref().is_some_and(|u| {
@@ -425,6 +441,7 @@ fn eligible(p: &ClaudeProfile, tried: &HashSet<String>, now: i64) -> bool {
 pub async fn list_claude_profiles() -> Result<ClaudeProfiles, String> {
     tokio::task::spawn_blocking(|| {
         let mut store = load()?;
+        store.waiting_for_quota = waiting_for_quota()?;
         let Ok((live, backups)) = desktop_paths() else {
             for p in &mut store.profiles {
                 p.desktop_status = "unavailable".into();
@@ -503,6 +520,7 @@ pub async fn import_current_claude_profile() -> Result<ClaudeProfiles, String> {
             account_uuid: None,
             desktop_status: String::new(),
             logged_in: false,
+            plan_type: None,
             last_warmup_at: None,
             usage: None,
             error: None,
@@ -519,6 +537,7 @@ pub async fn import_current_claude_profile() -> Result<ClaudeProfiles, String> {
             .context("Claude login has no email")?
             .to_owned();
         p.logged_in = true;
+        p.plan_type = verified_plan(&status);
         let _lock = lock_store()?;
         let mut store = load()?;
         if store.profiles.iter().any(|p| p.is_default) {
@@ -553,6 +572,11 @@ pub async fn refresh_claude_profiles() -> Result<ClaudeProfiles, String> {
                     .and_then(Value::as_str)
                     .is_some_and(|email| email.eq_ignore_ascii_case(&p.email))
         });
+        p.plan_type = if p.logged_in {
+            status.as_ref().ok().and_then(verified_plan)
+        } else {
+            None
+        };
         p.usage = None;
         p.error = None;
         if p.logged_in {
@@ -570,6 +594,7 @@ pub async fn refresh_claude_profiles() -> Result<ClaudeProfiles, String> {
     for updated in updates {
         if let Some(p) = store.profiles.iter_mut().find(|p| p.id == updated.id) {
             p.logged_in = updated.logged_in;
+            p.plan_type = updated.plan_type;
             p.usage = updated.usage;
             p.error = updated.error;
         }
@@ -640,6 +665,7 @@ async fn start_login_process(email: String) -> Result<ClaudeLogin> {
                 account_uuid: None,
                 desktop_status: String::new(),
                 logged_in: false,
+                plan_type: None,
                 last_warmup_at: None,
                 usage: None,
                 error: None,
@@ -710,7 +736,7 @@ async fn start_login_process(email: String) -> Result<ClaudeLogin> {
             }
             let _lock = lock_store()?;
             let mut store = load()?;
-            if let Some(p) = store.profiles.iter_mut().find(|a| a.id == p.id) { p.logged_in = true; p.error = None; p.account_uuid = code_account_uuid(p); }
+            if let Some(p) = store.profiles.iter_mut().find(|a| a.id == p.id) { p.logged_in = true; p.plan_type = verified_plan(&status); p.error = None; p.account_uuid = code_account_uuid(p); }
             save(&store)?;
             Ok(())
         }.await;
@@ -825,7 +851,10 @@ pub async fn complete_claude_login(flow_id: String, input: String) -> Result<(),
 fn update_login_url(flow_id: &str, line: &str) {
     if let Some(url) = extract_auth_url(line) {
         if let Ok(mut login) = LOGIN.lock() {
-            if let Some(login) = login.as_mut().filter(|l| l.flow_id == flow_id && l.status == "pending") {
+            if let Some(login) = login
+                .as_mut()
+                .filter(|l| l.flow_id == flow_id && l.status == "pending")
+            {
                 login.auth_url = Some(url);
             }
         }
@@ -918,6 +947,7 @@ async fn warmup_native(p: &ClaudeProfile) -> Result<()> {
     let usage = fetch_usage(p).await?;
     let mut verified = p.clone();
     verified.logged_in = true;
+    verified.plan_type = verified_plan(&status);
     verified.error = None;
     verified.usage = Some(usage);
     if !eligible(&verified, &HashSet::new(), chrono::Utc::now().timestamp()) {
@@ -1123,6 +1153,38 @@ fn event_path(run_id: &str) -> Result<PathBuf> {
     Ok(root()?.join("events").join(format!("{run_id}.json")))
 }
 
+// Runner processes cannot emit Tauri events; short-lived status files expose their wait state.
+fn waiting_for_quota() -> Result<bool> {
+    let path = root()?.join("waiting");
+    if !path.exists() {
+        return Ok(false);
+    }
+    let now = chrono::Utc::now().timestamp();
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        if let Ok(bytes) = fs::read(entry.path()) {
+            if let Ok(timestamp) = serde_json::from_slice::<i64>(&bytes) {
+                if (0..=90).contains(&(now - timestamp)) {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn runner_hook_marker(event: &Value) -> Result<Option<Value>> {
+    match event.get("hook_event_name").and_then(Value::as_str) {
+        Some("UserPromptSubmit") => Ok(Some(json!({"kind":"prompt"}))),
+        Some("StopFailure") if event.get("error").and_then(Value::as_str) == Some("rate_limit") => {
+            let session = event.get("session_id").and_then(Value::as_str).context("Missing session ID")?;
+            uuid::Uuid::parse_str(session)?;
+            Ok(Some(json!({"kind":"rate_limit","session_id":session})))
+        }
+        _ => Ok(None),
+    }
+}
+
 fn record_failure(args: &[String]) -> Result<()> {
     let path = event_path(args.get(1).context("Missing runner ID")?)?;
     let mut input = String::new();
@@ -1130,17 +1192,10 @@ fn record_failure(args: &[String]) -> Result<()> {
         .take(64 * 1024)
         .read_to_string(&mut input)?;
     let event: Value = serde_json::from_str(&input)?;
-    if event.get("hook_event_name").and_then(Value::as_str) != Some("StopFailure")
-        || event.get("error").and_then(Value::as_str) != Some("rate_limit")
-    {
-        return Ok(());
+    if let Some(marker) = runner_hook_marker(&event)? {
+        write_json(&path, &marker)?;
     }
-    let session = event
-        .get("session_id")
-        .and_then(Value::as_str)
-        .context("Missing session ID")?;
-    uuid::Uuid::parse_str(session)?;
-    write_json(&path, &json!({"session_id":session}))
+    Ok(())
 }
 
 fn run_session(args: &[String]) -> Result<()> {
@@ -1151,12 +1206,15 @@ fn run_session(args: &[String]) -> Result<()> {
     }
     let run_id = uuid::Uuid::new_v4().to_string();
     let event = event_path(&run_id)?;
+    let waiting_path = root()?.join("waiting").join(format!("{run_id}.json"));
+    let mut pending_failure: Option<Value> = None;
+    let mut next_probe = Instant::now();
     let hook = format!(
         "{} --claude-hook {}",
         quote(&std::env::current_exe()?.to_string_lossy()),
         quote(&run_id)
     );
-    let settings = json!({"hooks":{"StopFailure":[{"matcher":"rate_limit","hooks":[{"type":"command","command":hook,"timeout":5}]}]}}).to_string();
+    let settings = json!({"hooks":{"StopFailure":[{"matcher":"rate_limit","hooks":[{"type":"command","command":hook,"timeout":5}]}],"UserPromptSubmit":[{"hooks":[{"type":"command","command":hook,"timeout":5}]}]}}).to_string();
     let rt = tokio::runtime::Runtime::new()?;
     let mut resume: Option<String> = None;
     let mut tried = HashMap::new();
@@ -1178,28 +1236,45 @@ fn run_session(args: &[String]) -> Result<()> {
         loop {
             if let Some(status) = child.try_wait()? {
                 let _ = fs::remove_file(&event);
+                let _ = fs::remove_file(&waiting_path);
                 if !status.success() {
                     bail!("Claude exited with {status}");
                 }
                 return Ok(());
             }
             std::thread::sleep(Duration::from_millis(500));
-            if !event.exists() {
-                continue;
+            if event.exists() {
+                let marker: Value = serde_json::from_slice(&fs::read(&event)?)?;
+                fs::remove_file(&event)?;
+                if marker.get("kind").and_then(Value::as_str) == Some("prompt") {
+                    pending_failure = None;
+                    let _ = fs::remove_file(&waiting_path);
+                    continue;
+                }
+                pending_failure = Some(marker);
+                next_probe = Instant::now();
+                tried.insert(id.clone(), Instant::now());
             }
-            let failure: Value = serde_json::from_slice(&fs::read(&event)?)?;
-            fs::remove_file(&event)?;
             if !load()?.auto_switch_enabled {
+                pending_failure = None;
+                let _ = fs::remove_file(&waiting_path);
                 continue;
             }
+            let Some(failure) = pending_failure.as_ref() else {
+                continue;
+            };
+            if Instant::now() < next_probe {
+                continue;
+            }
+            next_probe = Instant::now() + Duration::from_secs(30);
             let refreshed = match rt.block_on(refresh_claude_profiles()) {
                 Ok(store) => store,
                 Err(error) => {
-                    eprintln!("\n[Switcher] Usage could not be verified: {error}. Current account retained.");
+                    let _ = write_json(&waiting_path, &chrono::Utc::now().timestamp());
+                    eprintln!("\n[Switcher] Usage could not be verified: {error}. Current account retained; retrying in 30 seconds.");
                     continue;
                 }
             };
-            tried.insert(id.clone(), Instant::now());
             tried.retain(|_, time| time.elapsed() < Duration::from_secs(60));
             let excluded = tried.keys().cloned().collect();
             let target = refreshed
@@ -1216,9 +1291,12 @@ fn run_session(args: &[String]) -> Result<()> {
                     remaining(a).total_cmp(&remaining(b))
                 });
             let Some(target) = target else {
-                eprintln!("\n[Switcher] No verified Claude account with remaining usage. The current session remains open.");
+                let _ = write_json(&waiting_path, &chrono::Utc::now().timestamp());
+                eprintln!("\n[Switcher] No verified Pro/Max/Team/Enterprise account with remaining usage. Waiting for a verified quota reset; retrying in 30 seconds.");
                 continue;
             };
+            // A user may submit a new prompt while native quota probes are in flight.
+            if event.exists() { continue; }
             let session = failure
                 .get("session_id")
                 .and_then(Value::as_str)
@@ -1245,8 +1323,10 @@ fn run_session(args: &[String]) -> Result<()> {
                 "\n[Switcher] Continuing the same local session with {}",
                 target.email
             );
+            let _ = fs::remove_file(&waiting_path);
             id = target.id.clone();
             resume = Some(session.to_owned());
+            pending_failure = None;
             let _lock = lock_store()?;
             let mut store = load()?;
             store.active_code_id = Some(id.clone());
@@ -1478,6 +1558,7 @@ mod tests {
             account_uuid: None,
             desktop_status: String::new(),
             logged_in: true,
+            plan_type: Some("pro".into()),
             last_warmup_at: None,
             error: None,
             usage: Some(
@@ -1485,6 +1566,7 @@ mod tests {
                     .unwrap(),
             ),
         };
+        p.usage.as_mut().unwrap().checked_at = now;
         assert!(warmup_due(&p, now));
         assert!(!warmup_due(&p, now + 61));
         p.last_warmup_at = Some(now);
@@ -1502,6 +1584,30 @@ mod tests {
     }
 
     #[test]
+    fn runner_hook_markers_distinguish_new_prompts_without_storing_prompt_text() {
+        let marker = runner_hook_marker(&json!({"hook_event_name":"UserPromptSubmit","prompt":"private user text"})).unwrap().unwrap();
+        assert_eq!(marker, json!({"kind":"prompt"}));
+        assert!(runner_hook_marker(&json!({"hook_event_name":"StopFailure","error":"other"})).unwrap().is_none());
+        let session = uuid::Uuid::new_v4().to_string();
+        assert_eq!(runner_hook_marker(&json!({"hook_event_name":"StopFailure","error":"rate_limit","session_id":session})).unwrap(), Some(json!({"kind":"rate_limit","session_id":session})));
+    }
+
+    #[test]
+    fn unknown_native_plan_and_saved_wait_state_fail_closed() {
+        assert_eq!(
+            verified_plan(&json!({"subscriptionType":"Pro"})).as_deref(),
+            Some("pro")
+        );
+        assert_eq!(verified_plan(&json!({"loggedIn":true})), None);
+        assert!(!paid_plan(
+            verified_plan(&json!({"subscriptionType":"free"})).as_deref()
+        ));
+        let saved: ClaudeProfiles =
+            serde_json::from_value(json!({"profiles":[],"waiting_for_quota":true})).unwrap();
+        assert!(!saved.waiting_for_quota);
+    }
+
+    #[test]
     fn only_fresh_verified_accounts_with_quota_are_eligible() {
         let mut p = ClaudeProfile {
             id: "b".into(),
@@ -1510,6 +1616,7 @@ mod tests {
             account_uuid: None,
             desktop_status: String::new(),
             logged_in: true,
+            plan_type: Some("pro".into()),
             last_warmup_at: None,
             error: None,
             usage: Some(
@@ -1522,6 +1629,14 @@ mod tests {
         let now = chrono::Utc::now().timestamp();
         let tried = HashSet::new();
         assert!(eligible(&p, &tried, now));
+        for plan in [None, Some("free"), Some("unknown")] {
+            p.plan_type = plan.map(str::to_owned);
+            assert!(!eligible(&p, &tried, now));
+        }
+        for plan in ["pro", "max", "team", "enterprise"] {
+            p.plan_type = Some(plan.into());
+            assert!(eligible(&p, &tried, now));
+        }
         assert!(!eligible(&p, &tried, now + 61));
         p.usage.as_mut().unwrap().seven_day_used = 100.0;
         assert!(!eligible(&p, &tried, now));
@@ -1571,6 +1686,7 @@ mod tests {
             account_uuid: Some("account-b".into()),
             desktop_status: String::new(),
             logged_in: true,
+            plan_type: Some("pro".into()),
             last_warmup_at: None,
             usage: None,
             error: None,

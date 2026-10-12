@@ -24,3 +24,6 @@ dist-ssr
 
 # Built binaries
 /codex-switcher
+
+# Local UI review captures can contain private account identities
+/.impeccable/review/

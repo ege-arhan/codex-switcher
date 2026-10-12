@@ -1,4 +1,11 @@
 export const claudeTranslations: Record<string, string> = {
+    "Project and switching details": "Proje ve geçiş ayrıntıları",
+    "Account details and sign-in": "Hesap ayrıntıları ve giriş",
+    "Auto-switch uses only verified Pro, Max, Team or Enterprise accounts with remaining usage.": "Otomatik geçiş yalnızca kalan kullanımı doğrulanmış Pro, Max, Team veya Enterprise hesaplarını kullanır.",
+    "Unknown plan": "Plan doğrulanamadı",
+    "Free": "Ücretsiz",
+    "No paid Claude account has verified remaining usage. Waiting for limits to reset; accounts are checked every 30 seconds.": "Kalan kullanımı doğrulanmış ücretli Claude hesabı yok. Limitlerin yenilenmesi bekleniyor; hesaplar 30 saniyede bir kontrol ediliyor.",
+
   "Claude accounts": "Claude hesapları",
   "Session limit": "Oturum limiti",
   "Weekly limit": "Haftalık limit",

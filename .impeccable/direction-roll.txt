@@ -1,0 +1,124 @@
+DIRECTION CONCEPT SEED (key: e5384a28; mode: operate; source: api; approved pool: c3b204a1eed6; 306/564 human-approved; rerun with --scope direction --mode operate --from e5384a28 --candidate-count 7 to reproduce this roll against this catalog revision)
+ASSIGNED INDEX: 5
+  After ordering the grounded directions by resonance, build candidate
+  5 of your own grounded list; the assignment never points at a
+  challenger. The assignment is the roll, not a suggestion: your top-ranked
+  direction is what every run would ship, so the script decides which grounded
+  direction gets built. Each direction joins a durable visual system to a
+  concrete expression for the requested first surface, decided as one. It must
+  survive the current task plus navigation, quiet and dense content,
+  interaction and state, and a substantially different future surface. In an
+  attended run, present the assigned direction fully committed and offer
+  re-roll. You may add ONE card for your top-ranked grounded candidate when
+  it is not the assigned direction, kicker IMPECCABLE’S PICK, with an honest risk line
+  naming its familiarity; one pick card, never a ranked lineup, and the pick
+  never takes the lead position. When the assignment IS your top candidate,
+  there is no pick card. Re-roll yourself only
+  on named factual grounds, when the assignment cannot carry the product's
+  truth or task; taste is never grounds.
+  The assignment exists to refuse the model's ranking rut, never to outrank
+  the user or the brief. Never expose assignment metadata in user-facing labels.
+CHALLENGERS:
+  1. a metropolitan rail map fired as a midnight-blue enamel mural, where scarlet, cobalt, amber, and green lines bend at disciplined angles, interchange circles bloom at crossings, and the entire city becomes a legible promise of movement
+     SOURCE ID: wayfinding-cartography-signage-midnight-transit-diagram
+     CREATIVE SPARK: Under the station's white light, four colored lines meet in one porcelain interchange; a fingertip follows the scarlet route outward until the dense center opens toward the river.
+     SYSTEM GRAMMAR:
+       - Palette/material: midnight-blue enamel ground with porcelain white station ticks, scarlet, cobalt, amber, and green line inks, the chosen line burning brightest
+       - Type/composition: humanist transit sans in fixed-size station labels, lines bending only at 45 and 90 degrees, the diagram's discipline is the composition
+       - Topology/navigation: Organize movement by line, station order, branch, interchange, fare boundary, and destination rather than literal geographic distance.
+       - Controls/state: Trace, transfer, reverse, reroute, and compare journeys with open, arriving, delayed, suspended, crowded, and accessible states.
+       - Responsive/motion: Focus the chosen corridor while preserving transfer context; never shrink the whole network into an unreadable miniature.
+     WEB LEVERAGE: Live service state can recompute only affected routes and transfer promises, while deep-linked itineraries, native search, and offline caching preserve a usable journey beyond the mural.
+     QUALITY BAR: board https://impeccable.style/worlds/cards/wayfinding-cartography-signage-midnight-transit-diagram.webp · hero https://impeccable.style/worlds/cards/wayfinding-cartography-signage-midnight-transit-diagram-hero.webp
+  2. a labanotation dance score, a vertical center staff read upward where symbol shape is direction, shading is level, and length is exact duration
+     SOURCE ID: notation-diagram-systems-labanotation
+     CREATIVE SPARK: In a mirrored studio a notator watches the leap twice, then draws a shaded rectangle whose exact height is the half-second the dancer hung in the air.
+     SYSTEM GRAMMAR:
+       - Palette/material: white score paper and black symbol blocks, level encoded as solid, hatched, or dotted fill, the beat in progress banded pale gray across the staff
+       - Type/composition: type stays marginal, small count numerals beside the staff; the vertical center staff rules the page and bilateral symmetry is the layout law
+       - Topology/navigation: columns flank a center line, left column for left limb and right for right, time flows bottom to top so the future is always above
+       - Controls/state: each action is a shaped block whose length is its duration, shading sets level, simultaneous acts sit side by side across the columns
+       - Responsive/motion: columns thin but never merge, symmetry across the centerline is the invariant; motion rises like a slow elevator
+     WEB LEVERAGE: CSS grid columns mirror the body's bilateral layout, and scroll timelines run time upward through the score.
+     QUALITY BAR: board https://impeccable.style/worlds/cards/notation-diagram-systems-labanotation.webp · hero https://impeccable.style/worlds/cards/notation-diagram-systems-labanotation-hero.webp
+  3. an Emigre bitmap type specimen, where coarse pixel letterforms are set proudly at poster scale and the low resolution is the aesthetic
+     SOURCE ID: emigre-bitmap-specimen
+     CREATIVE SPARK: A headline built from visible pixels towers over dense justified columns; the same face repeats at five sizes, and at the smallest the pixels dissolve into smooth gray text.
+     SYSTEM GRAMMAR:
+       - Palette/material: newsprint white and rich black with one synthetic accent; halftone and dot-matrix textures as legitimate surfaces
+       - Type/composition: coarse bitmap display faces against fine text grotesks; specimen-style repetition of one form at many sizes
+       - Topology/navigation: Move by typeface, by size step, and by issue spread.
+       - Controls/state: Scale, compare, and toggle bitmap versus smooth rendering as an honest state.
+       - Responsive/motion: Pixel letterforms scale only in whole-pixel multiples; nothing antialiases unless the reader asks.
+     WEB LEVERAGE: Pixel-honest display type via image-rendering rules and font sizes locked to integer multiples
+     QUALITY BAR: board https://impeccable.style/worlds/cards/emigre-bitmap-specimen.webp · hero https://impeccable.style/worlds/cards/emigre-bitmap-specimen-hero.webp
+  4. a jet-age airline ticket wallet, where carbon-copy coupons, route maps, and baggage tags choreograph one journey through crisp official color
+     SOURCE ID: vernacular-ephemera-jet-age-ticket-wallet
+     CREATIVE SPARK: Red carbon numerals, a fold-out route arc, a stapled baggage stub: the whole Atlantic crossing fits in a paper wallet.
+     SYSTEM GRAMMAR:
+       - Palette/material: carrier navy and red over crisp white coupon stock, carbon purple for every filled figure, the red VOID stamp owning the cancelled state
+       - Type/composition: airline grotesk caps on tabbed coupon heads, fare and flight boxes ruled in hairlines, carbon numerals striking fixed fields, one leg per sheet
+       - Topology/navigation: the flow is a coupon book; each leg tears off in sequence and the wallet always shows what remains.
+       - Controls/state: validated, used, and void states stamp themselves onto the coupon; nothing disappears, it cancels.
+       - Responsive/motion: coupons stack into a single stub column on phones; tear-off animates once
+     WEB LEVERAGE: Printable, deep-linkable coupon states with URL-addressable legs and offline-capable stubs.
+     QUALITY BAR: board https://impeccable.style/worlds/cards/vernacular-ephemera-jet-age-ticket-wallet.webp · hero https://impeccable.style/worlds/cards/vernacular-ephemera-jet-age-ticket-wallet-hero.webp
+  5. a convention circle catalog printed on newsprint, thousands of hand-drawn thumbnail squares packed into a numbered hall grid, each square carrying a circle name, a table code and a drawing done at postage-stamp size
+     SOURCE ID: pop-culture-shelf-doujin-event-catalog
+     CREATIVE SPARK: eight hundred drawings on one page, each one the size of a stamp, each with a table code, and somebody has gone through and circled forty of them in biro with a route planned between them.
+     SYSTEM GRAMMAR:
+       - Palette/material: single-ink black on cheap newsprint that grays under the thumb, with one spot color used only on the hall map dividers
+       - Type/composition: postage-stamp thumbnails packed edge to edge in a numbered grid, circle names set tiny beneath, and a folded hall map keyed to the codes
+       - Topology/navigation: the hall map and the grid are the same space, so navigation moves between a table code and its physical position
+       - Controls/state: controls are thumbnail cells, the active one is circled in pen, and visited ones are struck through by hand
+       - Responsive/motion: the grid repacks in whole cells, and motion is a jump from a catalog cell to its position on the hall map
+     WEB LEVERAGE: a whole-cell responsive thumbnail grid, marked state persisted local, and deep-linking between catalog cell and hall map
+     QUALITY BAR: board https://impeccable.style/worlds/cards/pop-culture-shelf-doujin-event-catalog.webp · hero https://impeccable.style/worlds/cards/pop-culture-shelf-doujin-event-catalog-hero.webp
+  6. a data-sublime field, where dense barcode columns and sine lattices strobe in pure black and white
+     SOURCE ID: ikeda-datamatics
+     CREATIVE SPARK: A wall of hairline vertical bars, some black, some white, holds like a frozen barcode. Dense monospace numbers pack the margin. A single sine curve traces the lattice, and for one frame the whole field snaps to its negative.
+     SYSTEM GRAMMAR:
+       - Palette/material: Pure black and pure white only, no grey and no color; flat pixel-crisp bars, hairline rules, and monospace numerics; the occasional full-frame inversion.
+       - Type/composition: One monospace face at data density, set in tight tabular columns; barcode bar-fields and sine curves structure the page
+       - Topology/navigation: Move by data column, by frequency band, and by frame index.
+       - Controls/state: Scan, sample, and invert; selecting a column pulls its numbers into focus while the surrounding field drops to a faint bar pattern.
+       - Responsive/motion: Columns thin and drop from the edges as width shrinks; reduced-motion disables all strobing and holds a single high-contrast still.
+     WEB LEVERAGE: Render the barcode and sine lattice on canvas from a seeded sequence, stepping frames on requestAnimationFrame that halts entirely under prefers-reduced-motion.
+     QUALITY BAR: board https://impeccable.style/worlds/cards/ikeda-datamatics.webp · hero https://impeccable.style/worlds/cards/ikeda-datamatics-hero.webp
+Fuse each challenger before judging it: the challenger supplies the form
+  and its system grammar, the product supplies every fact, and clarity wins
+  conflicts. Weigh the fused result against the assigned direction on exactly
+  two axes, audience identification and product clarity. Losing to strong
+  grounded material is a valid outcome; beating a thin or tool-monoculture
+  list is the point. A fused challenger that wins both axes becomes the build.
+  Close the weighing with a verdict per challenger, decided before any
+  borrowing is considered: wins (beats the assigned direction on both axes),
+  competitive (holds one axis), or declined (loses both). A declined
+  challenger is not spent: name the one discipline of its system the assigned
+  direction lacks, and raise the assigned direction to match before
+  presenting it. A donation transfers ambition and system discipline, never
+  the challenger's clothes; one world owns the page. Write each raise as its
+  own named line on the presented direction, and carry every verdict, kept
+  line, and raise into the decision page payload.
+When you can view images, open the QUALITY BAR board and hero for any
+challenger you weigh seriously and for the world you build. They exist as a
+craft bar, the finish level and commitment the build is expected to reach,
+never as a mockup to copy; your surface serves this product, not that render.
+PRODUCT.md and explicit incumbent brand commitments constrain every direction.
+The seed never chooses exact colors, fonts, tokens, or a user preference, and
+it never permits the world and first surface to be selected independently.
+The CREATIVE SPARK is a complete visual system, not a theme or decorative
+reference. Translate every supplied system rule into the product: palette and
+material, type and composition, topology, controls and states, and adaptation.
+Keep the source's visible character, scale, rhythm, and interaction instead of
+reducing vivid grammar to generic nouns. When the source is already a credible
+interface language, commit to it across navigation, content, controls, and
+states. Otherwise keep a literal carrier only when it becomes functional.
+Ambitious motion, spatial media, or interaction is welcome when it strengthens
+the product without weakening semantics, performance, or fallback behavior.
+AFTER THE CHOICE, run exactly one command and follow what it prints (do not suppress its output; do not write page code before it):
+  node ../../../../.agents/skills/impeccable/scripts/build-phase.mjs start --direction e5384a28 --kind <assigned|pick|challenger|canon> [--chosen <challenger-id>]
+  It records the choice (anonymous: card kind plus catalog id; skipped under DO_NOT_TRACK / IMPECCABLE_NO_TELEMETRY) and opens the build phases: on a comp-led build the comp round is the first gate (three comps, one approved) and no page code is written before it closes; on a code-led build it prints the contract step. A build without this state file is a build the finish reviewer treats as having skipped the round.
+A user- or brief-pinned decision beats the roll, always.
+ASSIGNED INDEX (restated for truncated readers): 5. Build candidate
+5 of your own grounded list; seed key e5384a28.

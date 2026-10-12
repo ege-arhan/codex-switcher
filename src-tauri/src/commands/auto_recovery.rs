@@ -1029,33 +1029,136 @@ pub fn extract_session_model_and_effort(rollout_path: &Path) -> (Option<String>,
     (found_model, found_effort)
 }
 
-fn rollout_turn_finished(path: &Path, turn_id: &str) -> bool {
-    use std::io::{Read, Seek, SeekFrom};
-    let Ok(mut file) = fs::File::open(path) else {
-        return false;
-    };
-    let Ok(meta) = file.metadata() else {
-        return false;
-    };
-    if file
-        .seek(SeekFrom::Start(meta.len().saturating_sub(131072)))
-        .is_err()
-    {
-        return false;
-    }
-    let mut bytes = Vec::new();
-    if file.read_to_end(&mut bytes).is_err() {
-        return false;
-    }
-    String::from_utf8_lossy(&bytes).lines().any(|line| {
-        serde_json::from_str::<serde_json::Value>(line).is_ok_and(|v| {
-            v.pointer("/payload/turn_id").and_then(|v| v.as_str()) == Some(turn_id)
-                && matches!(
-                    v.pointer("/payload/type").and_then(|v| v.as_str()),
-                    Some("task_complete" | "turn_aborted")
-                )
-        })
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+async fn desktop_ipc_request<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+    stream: &mut S,
+    request: serde_json::Value,
+) -> Result<serde_json::Value> {
+    use tokio::io::AsyncReadExt;
+    let id = request["requestId"]
+        .as_str()
+        .context("Desktop request has no ID")?;
+    let data = serde_json::to_vec(&request)?;
+    const MAX_FRAME: usize = 16 * 1024 * 1024;
+    anyhow::ensure!(data.len() <= MAX_FRAME, "Desktop request is too large");
+    // A timeout after writing is ambiguous: callers must never resend a turn.
+    tokio::time::timeout(Duration::from_secs(15), async {
+        stream.write_all(&(data.len() as u32).to_le_bytes()).await?;
+        stream.write_all(&data).await?;
+        stream.flush().await?;
+        loop {
+            let size = stream.read_u32_le().await? as usize;
+            anyhow::ensure!(
+                size > 0 && size <= MAX_FRAME,
+                "Invalid Desktop IPC frame size"
+            );
+            let mut bytes = vec![0; size];
+            stream.read_exact(&mut bytes).await?;
+            let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+            if value["type"] != "response" || value["requestId"].as_str() != Some(id) {
+                continue;
+            }
+            if value["resultType"] != "success" {
+                anyhow::bail!("Desktop IPC request rejected: {}", value["error"]);
+            }
+            return Ok(value);
+        }
     })
+    .await
+    .context("Desktop IPC acknowledgement timed out; delivery is unconfirmed")?
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn desktop_ipc_envelope(
+    client: &str,
+    method: &str,
+    version: u32,
+    params: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({"type":"request", "requestId":uuid::Uuid::new_v4().to_string(),
+        "sourceClientId":client, "method":method, "version":version, "params":params, "timeoutMs":12000})
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+async fn desktop_ipc_owner(session: &str) -> Result<(tokio::net::UnixStream, String, String)> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let uid = fs::metadata(dirs::home_dir().context("Home directory unavailable")?)?.uid();
+    let home = dirs::home_dir().context("Home directory unavailable")?;
+    let codex_home = std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".codex"));
+    let paths = [
+        codex_home.join("ipc/ipc.sock"),
+        std::env::temp_dir().join(format!("codex-ipc/ipc-{uid}.sock")),
+    ];
+    let socket = paths
+        .iter()
+        .find(|path| {
+            fs::symlink_metadata(path)
+                .is_ok_and(|meta| meta.file_type().is_socket() && meta.uid() == uid)
+                && path.parent().is_some_and(|parent| {
+                    fs::symlink_metadata(parent).is_ok_and(|meta| {
+                        meta.is_dir() && meta.uid() == uid && meta.mode() & 0o022 == 0
+                    })
+                })
+        })
+        .context("Trusted Codex Desktop IPC socket is unavailable")?;
+    let mut stream = tokio::time::timeout(
+        Duration::from_secs(2),
+        tokio::net::UnixStream::connect(socket),
+    )
+    .await??;
+    let initialized = desktop_ipc_request(
+        &mut stream,
+        desktop_ipc_envelope(
+            "",
+            "initialize",
+            0,
+            serde_json::json!({"clientType":"codex-switcher"}),
+        ),
+    )
+    .await?;
+    let client = initialized
+        .pointer("/result/clientId")
+        .and_then(|v| v.as_str())
+        .context("Desktop returned no IPC client ID")?
+        .to_owned();
+    let owner = desktop_ipc_request(
+        &mut stream,
+        desktop_ipc_envelope(
+            &client,
+            "thread-owner-discovery",
+            1,
+            serde_json::json!({"hostId":"local", "conversationId":session}),
+        ),
+    )
+    .await?;
+    let owner = owner["handledByClientId"]
+        .as_str()
+        .context("Desktop returned no thread owner")?
+        .to_owned();
+    Ok((stream, client, owner))
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+async fn desktop_ipc_start<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+    stream: &mut S,
+    client: &str,
+    owner: &str,
+    session: &str,
+    phrase: &str,
+) -> Result<()> {
+    let mut request = desktop_ipc_envelope(
+        client,
+        "thread-follower-start-turn",
+        2,
+        serde_json::json!({"conversationId":session, "turnStart":{
+            "request":{"threadId":session,"input":[{"type":"text","text":phrase}]},
+            "context":{"inheritThreadSettings":true}}}),
+    );
+    request["targetClientId"] = serde_json::json!(owner);
+    desktop_ipc_request(stream, request).await?;
+    Ok(())
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -1064,153 +1167,54 @@ async fn resume_desktop_after_handoff(
     sessions: &[ActiveCodexSession],
     settings: &AppSettings,
 ) -> Result<Vec<String>> {
-    // The desktop app owns the writer locks while open. Start real turns on a
-    // temporary app-server after closing it, then reopen the desktop UI.
-    #[cfg(target_os = "macos")]
-    let desktop_binary =
-        PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex");
-    #[cfg(target_os = "macos")]
-    let binary = if desktop_binary.is_file() {
-        desktop_binary
-    } else {
-        find_codex_binary()
-    };
-    #[cfg(not(target_os = "macos"))]
-    let binary = find_codex_binary();
-    let mut app_server_cmd = tokio::process::Command::new(binary);
-    app_server_cmd.env_remove("LD_LIBRARY_PATH");
-    let mut child = app_server_cmd
-        .arg("app-server")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .context("Could not start Codex app-server for desktop continuation")?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .context("Codex app-server has no stdin")?;
-    let stdout = child
-        .stdout
-        .take()
-        .context("Codex app-server has no stdout")?;
-    let mut lines = BufReader::new(stdout).lines();
-    let mut pending_turns = HashMap::new();
-    let result: Result<Vec<String>> = async {
-        app_server_request(
-            &mut stdin,
-            &mut lines,
-            1,
-            "initialize",
-            serde_json::json!({"clientInfo":{"name":"codex-switcher","version":env!("CARGO_PKG_VERSION")}}),
-        )
-        .await?;
-        stdin.write_all(b"{\"method\":\"initialized\",\"params\":{}}\n").await?;
-        stdin.flush().await?;
-        let catalog = app_server_request(&mut stdin, &mut lines, 2, "model/list",
-            serde_json::json!({"limit":100,"includeHidden":false})).await?;
-
-        let mut started = Vec::new();
-        for (index, session) in sessions.iter().enumerate() {
-            let id = 3 + index as u64 * 2;
-            let resumed = match app_server_request(
-                &mut stdin,
-                &mut lines,
-                id,
-                "thread/resume",
-                serde_json::json!({"threadId": session.session_id}),
-            )
-            .await {
-                Ok(resumed) => resumed,
-                Err(error) => {
-                    eprintln!("[AutoRecovery] Could not resume desktop thread {}: {error}", session.session_id);
-                    continue;
-                }
-            };
-            let model = select_recovery_model(&catalog, resumed.get("model").and_then(|v| v.as_str()))?;
-            let phrase = resolve_session_resume_phrase(&session.session_id, &settings.continue_phrase);
-            let mut turn_params = serde_json::json!({
-                "threadId": session.session_id,
-                "input": [{"type": "text", "text": phrase}],
-            });
-            turn_params["model"] = serde_json::json!(model);
-            let turn = match app_server_request(
-                &mut stdin,
-                &mut lines,
-                id + 1,
-                "turn/start",
-                turn_params,
-            )
-            .await {
-                Err(error) => {
-                eprintln!("[AutoRecovery] Could not start continuation in {}: {error}", session.session_id);
-                continue;
-                }
-                Ok(turn) => turn,
-            };
-            let turn_id = turn.pointer("/turn/id").and_then(|v| v.as_str()).context("Continuation has no turn ID")?;
-            pending_turns.insert(session.session_id.clone(), (turn_id.to_owned(), session.rollout_path.clone()));
-            started.push(session.session_id.clone());
-        }
-        if started.is_empty() {
-            anyhow::bail!("Codex could not start a continuation in any desktop session");
-        }
-        Ok(started)
-    }
-    .await;
-
-    // Release each finished thread, even if its completion arrived during a later RPC response.
-    if result.is_ok() {
-        tokio::spawn(async move {
-            let mut poll = tokio::time::interval(Duration::from_secs(2));
-            let mut request_id = 10000;
-            let _ = tokio::time::timeout(Duration::from_secs(4 * 3600), async {
-                while !pending_turns.is_empty() {
-                    let mut finished = Vec::new();
-                    tokio::select! {
-                        line = lines.next_line() => {
-                            match line {
-                                Ok(Some(line)) => {
-                                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
-                                        if value.get("method").and_then(|v| v.as_str()) == Some("turn/completed") {
-                                            if let (Some(thread), Some(turn)) = (value.pointer("/params/threadId").and_then(|v| v.as_str()),
-                                                value.pointer("/params/turn/id").and_then(|v| v.as_str())) {
-                                                if pending_turns.get(thread).is_some_and(|(expected, _)| expected == turn) {
-                                                    finished.push(thread.to_owned());
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => break,
-                            }
-                        }
-                        _ = poll.tick() => {
-                            let snapshots = pending_turns.clone();
-                            finished = tokio::task::spawn_blocking(move || snapshots.into_iter().filter_map(|(thread, (turn, path))|
-                                path.filter(|path| rollout_turn_finished(Path::new(path), &turn)).map(|_| thread)).collect::<Vec<_>>()).await.unwrap_or_default();
-                        }
-                    }
-                    for thread in finished {
-                        pending_turns.remove(&thread);
-                        request_id += 1;
-                        let request = serde_json::json!({"id":request_id,"method":"thread/unsubscribe","params":{"threadId":thread}});
-                        if stdin.write_all(format!("{request}\n").as_bytes()).await.is_err() { break; }
-                        let _ = stdin.flush().await;
-                    }
-                }
-            }).await;
-            let _ = child.kill().await;
-        });
-    } else {
-        let _ = child.kill().await;
-    }
-
-    let reopened = crate::commands::reopen_closed_codex_desktop(token)
+    crate::commands::reopen_closed_codex_desktop(token)
         .await
-        .map_err(anyhow::Error::msg);
-    reopened?;
-    result
+        .map_err(anyhow::Error::msg)?;
+    let mut started = Vec::new();
+    let mut failures = Vec::new();
+    for session in sessions {
+        // Discover only before delivery. Retrying an ambiguous turn acknowledgement duplicates messages.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
+        let owner = loop {
+            match desktop_ipc_owner(&session.session_id).await {
+                Ok(owner) => break Ok(owner),
+                Err(error) if tokio::time::Instant::now() < deadline => {
+                    let _ = error;
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                Err(error) => break Err(error),
+            }
+        };
+        let phrase = resolve_session_resume_phrase(&session.session_id, &settings.continue_phrase);
+        let result = match owner {
+            Ok((mut stream, client, owner)) => {
+                if let Ok(mut tracker) = TRACKER.lock() {
+                    tracker.handled_usage_limits.insert(session.session_id.clone(), session.last_error.as_ref().and_then(|e| e.turn_id.clone()).unwrap_or_else(|| "default".into()));
+                }
+                desktop_ipc_start(&mut stream, &client, &owner, &session.session_id, &phrase).await
+            }
+            Err(error) => Err(error),
+        };
+        match result {
+            Ok(()) => started.push(session.session_id.clone()),
+            Err(error) => failures.push(format!("{}: {error}", session.session_id)),
+        }
+    }
+    if !failures.is_empty() {
+        send_desktop_notification("Codex Switcher", crate::commands::language::text(
+            "Some chats could not confirm automatic continuation. Open the chat and retry manually; no duplicate was sent.",
+            "Bazı sohbetlerde otomatik devam doğrulanamadı. Sohbeti açıp elle devam edin; tekrar mesaj gönderilmedi."));
+        eprintln!(
+            "[AutoRecovery] Desktop owner continuation: {}",
+            failures.join("; ")
+        );
+    }
+    anyhow::ensure!(
+        !started.is_empty(),
+        "Codex Desktop could not confirm continuation: {}",
+        failures.join("; ")
+    );
+    Ok(started)
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -1644,6 +1648,13 @@ pub fn calculate_account_score(
     score
 }
 
+fn paid_codex_plan(plan: Option<&str>) -> bool {
+    matches!(
+        plan.map(str::to_ascii_lowercase).as_deref(),
+        Some("plus" | "pro" | "pro_lite" | "prolite" | "team" | "business" | "enterprise" | "edu")
+    )
+}
+
 /// Select best candidate account to switch to
 pub fn select_best_account(
     accounts: &[StoredAccount],
@@ -1671,15 +1682,7 @@ pub fn select_best_account(
             if windows.is_empty() || windows.iter().any(|v| !v.is_finite() || *v < 0.0) {
                 return false;
             }
-            let has_reset = resets_map.get(&a.id).is_some_and(|r| {
-                r.credits.iter().any(|c| {
-                    c.status.eq_ignore_ascii_case("available")
-                        && c.expires_at.as_deref().map_or(true, |e| {
-                            DateTime::parse_from_rfc3339(e).is_ok_and(|e| e > Utc::now())
-                        })
-                })
-            });
-            windows.iter().all(|v| *v < 100.0) || has_reset
+            paid_codex_plan(usage.plan_type.as_deref()) && windows.iter().all(|v| *v < 100.0)
         })
         .collect();
 
@@ -2791,6 +2794,13 @@ async fn handle_account_switch_for_session(
         }
     }
 
+    let waiting_for_reset = TRACKER.lock().ok().is_some_and(|tracker| {
+        tracker.last_event.as_ref().is_some_and(|event| {
+            event.event_type == "quota_waiting" && event.session_id == session.session_id
+        })
+    });
+    let selection_current_id = if waiting_for_reset { None } else { current_id };
+
     // Fetch usage and stats cache
     let mut usage_map = HashMap::new();
     let mut resets_map = HashMap::new();
@@ -2798,7 +2808,7 @@ async fn handle_account_switch_for_session(
     // One stalled profile request must not block every recovery cycle. Fetch
     // candidates concurrently and bound each account's total lookup time.
     let candidates = store.accounts.iter().filter(|acc| {
-        Some(acc.id.as_str()) != current_id
+        Some(acc.id.as_str()) != selection_current_id
             && !settings
                 .auto_switch_excluded_account_ids
                 .iter()
@@ -2843,7 +2853,7 @@ async fn handle_account_switch_for_session(
     }
     let target_account = select_best_account(
         &store.accounts,
-        current_id,
+        selection_current_id,
         settings.auto_switch_strategy,
         &usage_map,
         &resets_map,
@@ -2852,7 +2862,30 @@ async fn handle_account_switch_for_session(
     );
 
     let Some(target) = target_account else {
-        anyhow::bail!("No eligible fallback account found with available limits");
+        let message = "No Plus-or-higher account has verified remaining quota. Waiting for limits to reset; automatic switching will retry.";
+        let mut tracker = TRACKER
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Tracker poisoned"))?;
+        tracker.failed_recoveries.insert(
+            session.session_id.clone(),
+            (recovery_turn_key(session), Instant::now()),
+        );
+        if tracker
+            .last_event
+            .as_ref()
+            .is_some_and(|e| e.event_type == "quota_waiting" && e.session_id == session.session_id)
+        {
+            return Ok(None);
+        }
+        let event = RecoveryEventNotification {
+            event_type: "quota_waiting".into(),
+            session_id: session.session_id.clone(),
+            message: message.into(),
+            timestamp: Utc::now(),
+        };
+        tracker.last_event = Some(event.clone());
+        send_desktop_notification("Codex Switcher", crate::commands::language::text(message, "Plus veya üstü hesaplarda doğrulanmış kalan limit yok. Limit yenilenmesi bekleniyor; otomatik geçiş tekrar denenecek."));
+        return Ok(Some(event));
     };
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -3236,29 +3269,80 @@ mod tests {
     use super::*;
     use chrono::{Duration as ChronoDuration, TimeZone};
 
-    #[test]
-    fn finished_rollout_matches_only_the_recovered_turn() {
-        let path =
-            std::env::temp_dir().join(format!("switcher-completion-{}", uuid::Uuid::new_v4()));
-        fs::write(
-            &path,
-            "{\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"earlier\"}}\n",
-        )
-        .unwrap();
-        assert!(!rollout_turn_finished(&path, "active"));
-        fs::write(
-            &path,
-            "{\"payload\":{\"type\":\"turn_aborted\",\"turn_id\":\"active\"}}\n",
-        )
-        .unwrap();
-        assert!(rollout_turn_finished(&path, "active"));
-        fs::remove_file(path).unwrap();
+    #[tokio::test]
+    async fn desktop_owner_bridge_targets_owner_and_never_retries_unconfirmed_delivery() {
+        use tokio::io::AsyncReadExt;
+        for acknowledge in [true, false] {
+            let (mut client, mut server) = tokio::io::duplex(8192);
+            let receiver = tokio::spawn(async move {
+                let size = server.read_u32_le().await.unwrap() as usize;
+                let mut bytes = vec![0; size];
+                server.read_exact(&mut bytes).await.unwrap();
+                let request: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(request["method"], "thread-follower-start-turn");
+                assert_eq!(request["version"], 2);
+                assert_eq!(request["targetClientId"], "desktop-owner");
+                assert_eq!(
+                    request.pointer("/params/turnStart/context/inheritThreadSettings"),
+                    Some(&serde_json::json!(true))
+                );
+                assert_eq!(
+                    request
+                        .pointer("/params/turnStart/request/input/0/text")
+                        .unwrap(),
+                    "/goal resume"
+                );
+                if acknowledge {
+                    let response = serde_json::to_vec(&serde_json::json!({"type":"response", "requestId":request["requestId"], "resultType":"success", "result":{"result":{}}})).unwrap();
+                    server
+                        .write_all(&(response.len() as u32).to_le_bytes())
+                        .await
+                        .unwrap();
+                    server.write_all(&response).await.unwrap();
+                    // Closing client after the one acknowledgement proves there is no second delivery.
+                    assert_eq!(
+                        server.read_u8().await.unwrap_err().kind(),
+                        std::io::ErrorKind::UnexpectedEof
+                    );
+                }
+                // Without an acknowledgement, close after the one received request.
+            });
+            let result = desktop_ipc_start(
+                &mut client,
+                "switcher",
+                "desktop-owner",
+                "thread",
+                "/goal resume",
+            )
+            .await;
+            assert_eq!(result.is_ok(), acknowledge);
+            drop(client);
+            receiver.await.unwrap();
+        }
     }
 
     #[tokio::test]
     async fn concurrent_recovery_cycle_skips_all_side_effects() {
         let _guard = RECOVERY_LOCK.lock().await;
         assert!(check_and_recover_sessions().await.unwrap().is_none());
+    }
+
+    #[test]
+    fn auto_switch_requires_paid_plan() {
+        for plan in [None, Some("free"), Some("go"), Some("unknown")] {
+            assert!(!paid_codex_plan(plan));
+        }
+        for plan in [
+            "plus",
+            "pro",
+            "pro_lite",
+            "team",
+            "business",
+            "enterprise",
+            "edu",
+        ] {
+            assert!(paid_codex_plan(Some(plan)));
+        }
     }
 
     #[test]
@@ -3281,7 +3365,7 @@ mod tests {
             .is_none());
         }
         let mut snapshot: UsageInfo = serde_json::from_value(serde_json::json!({
-            "account_id":"fallback", "primary_used_percent":10.0, "secondary_used_percent":100.0,
+            "account_id":"fallback", "plan_type":"plus", "primary_used_percent":10.0, "secondary_used_percent":100.0,
             "credits":null, "has_credits":false, "unlimited_credits":false
         }))
         .unwrap();

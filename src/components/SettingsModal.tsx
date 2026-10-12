@@ -1,3 +1,4 @@
+import { THEMES, normalizeTheme, type ThemeMode } from "../lib/theme";
 import { t, useI18n, localizeMessage } from "../lib/i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DesktopReopenPreference } from "../lib/desktopReopen";
@@ -12,6 +13,8 @@ interface DisplaySettings {
 }
 
 interface SettingsModalProps {
+  themeMode: ThemeMode;
+  onThemeChange: (value: ThemeMode) => void;
   reopenPreference: DesktopReopenPreference;
   onReopenPreferenceChange: (value: DesktopReopenPreference) => void;
   closePreference: CodexClosePreference;
@@ -20,6 +23,8 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({
+  themeMode,
+  onThemeChange,
   reopenPreference,
   onReopenPreferenceChange,
   closePreference,
@@ -129,6 +134,18 @@ export function SettingsModal({
           <select id="interface-language" value={language} onChange={(event) => setLanguage(event.target.value as "tr" | "en")} className={selectClassName}>
             <option value="tr">Türkçe</option><option value="en">{t("English")}</option>
           </select>
+          <fieldset className="theme-picker">
+            <legend className="text-sm font-medium text-gray-900 dark:text-gray-100">{t("Appearance")}</legend>
+            <div className="theme-options">
+              {THEMES.map((theme) => (
+                <label key={theme.id} className="theme-option" data-selected={normalizeTheme(themeMode) === theme.id}>
+                  <input type="radio" name="interface-theme" value={theme.id} checked={normalizeTheme(themeMode) === theme.id} onChange={() => onThemeChange(theme.id)} />
+                  <span className="theme-preview" data-preview={theme.id} aria-hidden="true"><span /><i /><i /></span>
+                  <span className="theme-option-copy"><strong>{t(theme.name)}</strong><span>{t(theme.description)}</span></span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
           {desktop && (
             <>
               {displaySettings ? (

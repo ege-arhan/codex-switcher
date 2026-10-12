@@ -32,6 +32,7 @@
 - **Codex `/goal` Continuity** – Detect active or interrupted goal objectives from local SQLite state and automatically resume them using `/goal resume`
 - **Blocked Switch Recovery** – Detect running Codex sessions and offer a force-close flow before retrying the account switch
 - **Dual Login Mode** – Authenticate with ChatGPT OAuth or import existing `auth.json` files
+- **Seven Desktop Themes** – Choose macOS (default), Windows XP, Windows 7, Terminal, Paper, Nord or Mono in Settings; provider tabs keep account lists focused while preserving advanced controls
 - **Interface Language** – Choose Turkish or English in Settings; the preference also applies to dates, usage labels and native menus
 - **Claude Accounts (macOS)** – Keep native Code logins and Desktop profiles separate, monitor quota, warm up accounts, and resume managed Code sessions after quota exhaustion
 
@@ -183,11 +184,14 @@ Claude owns the credentials in Keychain or its private credential file.
 **Open Claude Code** opens a managed terminal immediately in your home directory.
 **Choose project folder** optionally selects and remembers a project directory;
 **Home directory** clears that choice. With
-**Claude Code auto-switch** enabled, a native `StopFailure` rate-limit hook
+**Claude Code auto-switch** enabled, only verified Pro/Max/Team/Enterprise
+subscription accounts with fresh remaining quota are eligible. A native `StopFailure` rate-limit hook
 checks the saved accounts' current usage and resumes the same local session
 in that terminal with an available account. Five-hour, weekly and reported
 model limits must all permit work; unknown or stale usage is never assumed
-to be available. Expiring logins are renewed through the native CLI. Local
+to be available. Expiring logins are renewed through the native CLI. If no eligible quota is
+available, the terminal keeps the failed session and waits, rechecking live
+usage every 30 seconds. The Claude section shows the waiting state and plan badges. Local
 projects, settings and skills are shared; logins remain separate. Ordinary
 `claude` processes opened outside Switcher keep their own account.
 
@@ -291,3 +295,17 @@ pnpm release patch -- --push
 # For non-interactive use, pass the note explicitly.
 pnpm release patch -- --push --note "Fixed account switching issues"
 ```
+
+### Paid quota and Desktop recovery
+
+Codex automatic switching only selects Plus, Pro/Pro Lite, Team/Business,
+Enterprise or Edu accounts with verified remaining quota. Free, Go, unknown
+plans and exhausted accounts are excluded, even if they have banked reset
+credits. Manual account switching remains available. With no eligible account,
+the app shows a waiting warning and rechecks quota every minute; it can resume
+on the current account once its quota actually resets.
+
+Desktop continuations use the installed Codex Desktop's local owner IPC,
+so the Desktop process retains the conversation writer. The native IPC is
+versioned but not a public stable API; discovery/communication failure is
+reported instead of starting a separate writer process.
