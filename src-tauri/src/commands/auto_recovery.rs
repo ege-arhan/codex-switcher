@@ -22,9 +22,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::auth::{
-    ensure_chatgpt_tokens_fresh_locked, load_accounts, load_app_settings, read_current_auth,
-    save_accounts, save_app_settings, switch_to_account, sync_active_account_tokens,
-    AUTH_OPERATION_LOCK,
+    ensure_chatgpt_tokens_fresh_locked, get_codex_home, load_accounts, load_app_settings,
+    read_current_auth, save_accounts, save_app_settings, switch_to_account,
+    sync_active_account_tokens, AUTH_OPERATION_LOCK,
 };
 use crate::commands::account_stats::AccountResetCredits;
 use crate::types::{AppSettings, AutoSwitchStrategy, StoredAccount, UsageInfo};
@@ -87,8 +87,12 @@ struct SessionTrackerState {
     /// Last recovery event notification
     last_event: Option<RecoveryEventNotification>,
     /// Last account switch timestamp, target account ID, was_reset_credit, and the session_id that triggered it
-    last_account_switch: Option<(Instant, String, bool, String)>,
+    last_account_switch: Option<(Instant, DateTime<Utc>, String, bool, String)>,
+    failed_recoveries: HashMap<String, (String, Instant)>,
+    pending_launches: HashMap<String, (ActiveCodexSession, String, Instant)>,
 }
+
+static RECOVERY_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 static TRACKER: std::sync::LazyLock<Mutex<SessionTrackerState>> = std::sync::LazyLock::new(|| {
     Mutex::new(SessionTrackerState {
@@ -97,6 +101,8 @@ static TRACKER: std::sync::LazyLock<Mutex<SessionTrackerState>> = std::sync::Laz
         managed_pids: Vec::new(),
         last_event: None,
         last_account_switch: None,
+        failed_recoveries: HashMap::new(),
+        pending_launches: HashMap::new(),
     })
 });
 
@@ -127,23 +133,30 @@ fn macos_resume_command(
     effort: Option<&str>,
     restart_file: &Path,
 ) -> String {
-    let cwd = escape_shell_arg(&cwd.to_string_lossy());
-    let binary = escape_shell_arg(&codex_bin.to_string_lossy());
-    let session = escape_shell_arg(session_id);
-    let phrase_arg = if phrase == "/goal resume" || phrase.is_empty() {
-        String::new()
-    } else {
-        format!(" {}", escape_shell_arg(phrase))
-    };
-    let model_arg = model
-        .map(|m| format!(" --model {}", escape_shell_arg(m)))
-        .unwrap_or_default();
-    let effort_arg = effort
-        .map(|e| format!(" -c model_reasoning_effort={}", escape_shell_arg(e)))
-        .unwrap_or_default();
-    let restart_file_arg = escape_shell_arg(&restart_file.to_string_lossy());
+    let runner = r#"cd "$1" || exit
+binary="$2"; session="$3"; phrase="$4"; model="$5"; effort="$6"; restart="$7"
+while true; do
+  set -- "$binary" resume
+  if [ -n "$model" ]; then set -- "$@" --model "$model"; fi
+  if [ -n "$effort" ]; then set -- "$@" -c "model_reasoning_effort=\"$effort\""; fi
+  set -- "$@" "$session"
+  if [ -n "$phrase" ] && [ "$phrase" != "/goal resume" ]; then set -- "$@" "$phrase"; fi
+  "$@"
+  [ -f "$restart" ] || break
+  phrase=$(sed -n '1p' "$restart"); model=$(sed -n '2p' "$restart"); effort=$(sed -n '3p' "$restart")
+  rm -f "$restart"
+  sleep 1
+done"#;
     format!(
-        "cd {cwd} && while true; do {binary} resume{model_arg}{effort_arg} {session}{phrase_arg}; if [ -f {restart_file_arg} ]; then rm -f {restart_file_arg}; sleep 1; continue; fi; break; done; exit"
+        "sh -c {} sh {} {} {} {} {} {} {}; exit",
+        escape_shell_arg(runner),
+        escape_shell_arg(&cwd.to_string_lossy()),
+        escape_shell_arg(&codex_bin.to_string_lossy()),
+        escape_shell_arg(session_id),
+        escape_shell_arg(phrase),
+        escape_shell_arg(model.unwrap_or("")),
+        escape_shell_arg(effort.unwrap_or("")),
+        escape_shell_arg(&restart_file.to_string_lossy())
     )
 }
 
@@ -199,7 +212,8 @@ pub fn find_codex_binary() -> PathBuf {
 pub fn find_active_sessions() -> Result<Vec<ActiveCodexSession>> {
     let mut sessions = Vec::new();
     let home = dirs::home_dir().context("Could not determine home directory")?;
-    let locks_dir = home.join(".codex/thread-writer-locks");
+    let codex_home = get_codex_home()?;
+    let locks_dir = codex_home.join("thread-writer-locks");
 
     if !locks_dir.exists() {
         return Ok(sessions);
@@ -355,7 +369,10 @@ fn inspect_session_meta(rollout_path: &Path) -> Option<SessionRolloutMeta> {
 
 /// Locate rollout jsonl file for a session ID in ~/.codex/sessions/
 pub fn locate_rollout_file(codex_home: &Path, session_id: &str) -> Option<PathBuf> {
-    let base = codex_home.join(".codex/sessions");
+    let base = std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| codex_home.join(".codex"))
+        .join("sessions");
     if !base.exists() {
         return None;
     }
@@ -716,8 +733,9 @@ async fn app_server_response(
     lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
     id: u64,
 ) -> Result<serde_json::Value> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
-        let line = tokio::time::timeout(Duration::from_secs(15), lines.next_line())
+        let line = tokio::time::timeout_at(deadline, lines.next_line())
             .await
             .context("Codex app-server did not respond")?
             .context("Could not read Codex app-server response")?
@@ -823,12 +841,6 @@ async fn resolve_recovery_model(preferred: Option<&str>) -> Result<String> {
     }.await;
     let _ = child.kill().await;
     result
-}
-
-#[allow(dead_code)]
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-async fn default_recovery_model() -> Result<String> {
-    resolve_recovery_model(None).await
 }
 
 /// Read default model and reasoning effort from ~/.codex/config.toml
@@ -1017,6 +1029,35 @@ pub fn extract_session_model_and_effort(rollout_path: &Path) -> (Option<String>,
     (found_model, found_effort)
 }
 
+fn rollout_turn_finished(path: &Path, turn_id: &str) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let Ok(meta) = file.metadata() else {
+        return false;
+    };
+    if file
+        .seek(SeekFrom::Start(meta.len().saturating_sub(131072)))
+        .is_err()
+    {
+        return false;
+    }
+    let mut bytes = Vec::new();
+    if file.read_to_end(&mut bytes).is_err() {
+        return false;
+    }
+    String::from_utf8_lossy(&bytes).lines().any(|line| {
+        serde_json::from_str::<serde_json::Value>(line).is_ok_and(|v| {
+            v.pointer("/payload/turn_id").and_then(|v| v.as_str()) == Some(turn_id)
+                && matches!(
+                    v.pointer("/payload/type").and_then(|v| v.as_str()),
+                    Some("task_complete" | "turn_aborted")
+                )
+        })
+    })
+}
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 async fn resume_desktop_after_handoff(
     token: String,
@@ -1054,6 +1095,7 @@ async fn resume_desktop_after_handoff(
         .take()
         .context("Codex app-server has no stdout")?;
     let mut lines = BufReader::new(stdout).lines();
+    let mut pending_turns = HashMap::new();
     let result: Result<Vec<String>> = async {
         app_server_request(
             &mut stdin,
@@ -1085,16 +1127,14 @@ async fn resume_desktop_after_handoff(
                     continue;
                 }
             };
-            let model = select_recovery_model(&catalog, resumed.get("model").and_then(|v| v.as_str())).ok();
+            let model = select_recovery_model(&catalog, resumed.get("model").and_then(|v| v.as_str()))?;
             let phrase = resolve_session_resume_phrase(&session.session_id, &settings.continue_phrase);
             let mut turn_params = serde_json::json!({
                 "threadId": session.session_id,
                 "input": [{"type": "text", "text": phrase}],
             });
-            if let Some(ref m) = model {
-                turn_params["model"] = serde_json::json!(m);
-            }
-            if let Err(error) = app_server_request(
+            turn_params["model"] = serde_json::json!(model);
+            let turn = match app_server_request(
                 &mut stdin,
                 &mut lines,
                 id + 1,
@@ -1102,9 +1142,14 @@ async fn resume_desktop_after_handoff(
                 turn_params,
             )
             .await {
+                Err(error) => {
                 eprintln!("[AutoRecovery] Could not start continuation in {}: {error}", session.session_id);
                 continue;
-            }
+                }
+                Ok(turn) => turn,
+            };
+            let turn_id = turn.pointer("/turn/id").and_then(|v| v.as_str()).context("Continuation has no turn ID")?;
+            pending_turns.insert(session.session_id.clone(), (turn_id.to_owned(), session.rollout_path.clone()));
             started.push(session.session_id.clone());
         }
         if started.is_empty() {
@@ -1114,35 +1159,47 @@ async fn resume_desktop_after_handoff(
     }
     .await;
 
-    // Keep the app-server and its writer locks alive until the turns finish.
-    if let Ok(started) = &result {
-        let remaining = started.len();
+    // Release each finished thread, even if its completion arrived during a later RPC response.
+    if result.is_ok() {
         tokio::spawn(async move {
-            let _stdin = stdin;
-            let mut completed = 0;
+            let mut poll = tokio::time::interval(Duration::from_secs(2));
+            let mut request_id = 10000;
             let _ = tokio::time::timeout(Duration::from_secs(4 * 3600), async {
-                while completed < remaining {
-                    match lines.next_line().await {
-                        Ok(Some(line)) => {
-                            if serde_json::from_str::<serde_json::Value>(&line)
-                                .ok()
-                                .and_then(|value| {
-                                    value
-                                        .get("method")
-                                        .and_then(|m| m.as_str())
-                                        .map(str::to_owned)
-                                })
-                                .as_deref()
-                                == Some("turn/completed")
-                            {
-                                completed += 1;
+                while !pending_turns.is_empty() {
+                    let mut finished = Vec::new();
+                    tokio::select! {
+                        line = lines.next_line() => {
+                            match line {
+                                Ok(Some(line)) => {
+                                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+                                        if value.get("method").and_then(|v| v.as_str()) == Some("turn/completed") {
+                                            if let (Some(thread), Some(turn)) = (value.pointer("/params/threadId").and_then(|v| v.as_str()),
+                                                value.pointer("/params/turn/id").and_then(|v| v.as_str())) {
+                                                if pending_turns.get(thread).is_some_and(|(expected, _)| expected == turn) {
+                                                    finished.push(thread.to_owned());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => break,
                             }
                         }
-                        _ => break,
+                        _ = poll.tick() => {
+                            let snapshots = pending_turns.clone();
+                            finished = tokio::task::spawn_blocking(move || snapshots.into_iter().filter_map(|(thread, (turn, path))|
+                                path.filter(|path| rollout_turn_finished(Path::new(path), &turn)).map(|_| thread)).collect::<Vec<_>>()).await.unwrap_or_default();
+                        }
+                    }
+                    for thread in finished {
+                        pending_turns.remove(&thread);
+                        request_id += 1;
+                        let request = serde_json::json!({"id":request_id,"method":"thread/unsubscribe","params":{"threadId":thread}});
+                        if stdin.write_all(format!("{request}\n").as_bytes()).await.is_err() { break; }
+                        let _ = stdin.flush().await;
                     }
                 }
-            })
-            .await;
+            }).await;
             let _ = child.kill().await;
         });
     } else {
@@ -1362,7 +1419,12 @@ pub fn check_rollout_for_errors(
                     session_id: session_id.to_string(),
                     turn_id,
                     message,
-                    detected_at: Utc::now(),
+                    detected_at: json_val
+                        .get("timestamp")
+                        .and_then(|v| v.as_str())
+                        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+                        .map(|time| time.with_timezone(&Utc))
+                        .unwrap_or_else(Utc::now),
                 });
             } else {
                 // Latest task completed with some other unrecoverable error
@@ -1598,6 +1660,27 @@ pub fn select_best_account(
             current_account_id.map_or(true, |curr| a.id != curr)
                 && !excluded_account_ids.iter().any(|id| id == &a.id)
         })
+        .filter(|a| {
+            let Some(usage) = usage_map.get(&a.id).filter(|u| u.error.is_none()) else {
+                return false;
+            };
+            let windows: Vec<_> = [usage.primary_used_percent, usage.secondary_used_percent]
+                .into_iter()
+                .flatten()
+                .collect();
+            if windows.is_empty() || windows.iter().any(|v| !v.is_finite() || *v < 0.0) {
+                return false;
+            }
+            let has_reset = resets_map.get(&a.id).is_some_and(|r| {
+                r.credits.iter().any(|c| {
+                    c.status.eq_ignore_ascii_case("available")
+                        && c.expires_at.as_deref().map_or(true, |e| {
+                            DateTime::parse_from_rfc3339(e).is_ok_and(|e| e > Utc::now())
+                        })
+                })
+            });
+            windows.iter().all(|v| *v < 100.0) || has_reset
+        })
         .collect();
 
     if candidates.is_empty() {
@@ -1625,7 +1708,7 @@ pub fn select_best_account(
                 return Some((*candidate).clone());
             }
         }
-        return candidates.first().map(|a| (*a).clone());
+        return None;
     }
 
     let now = Utc::now();
@@ -1786,44 +1869,59 @@ pub async fn send_codex_queue_resume(session_id: &str, phrase: &str) -> Result<(
     Ok(())
 }
 
-/// Terminate a process cleanly with SIGTERM then SIGKILL
-pub fn terminate_process(pid: u32) {
+/// Stop only the failed CLI process; leave a process that refuses graceful exit untouched.
+pub async fn terminate_process(pid: u32) -> Result<()> {
     if pid == 0 {
-        return;
+        return Ok(());
     }
     #[cfg(unix)]
     {
-        #[cfg(target_os = "linux")]
-        {
-            if let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) {
-                if let Some(ppid_str) = stat.split_whitespace().nth(3) {
-                    if let Ok(ppid) = ppid_str.parse::<u32>() {
-                        if ppid > 1 {
-                            if let Ok(cmd) = fs::read_to_string(format!("/proc/{ppid}/cmdline")) {
-                                if cmd.contains("node") && cmd.contains("codex") {
-                                    let _ = Command::new("kill")
-                                        .args(["-TERM", &ppid.to_string()])
-                                        .status();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        let output = tokio::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "args="])
+            .output()
+            .await?;
+        if output.stdout.is_empty() {
+            return Ok(());
         }
-        let _ = Command::new("kill")
+        if !is_supported_cli_command(&String::from_utf8_lossy(&output.stdout)) {
+            anyhow::bail!("Session process changed; refusing to terminate another process");
+        }
+        if !tokio::process::Command::new("kill")
             .args(["-TERM", &pid.to_string()])
-            .status();
-        std::thread::sleep(Duration::from_millis(300));
-        let _ = Command::new("kill")
-            .args(["-KILL", &pid.to_string()])
-            .status();
+            .status()
+            .await?
+            .success()
+        {
+            anyhow::bail!("Could not stop the failed Codex CLI process");
+        }
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let output = tokio::process::Command::new("ps")
+                .args(["-p", &pid.to_string(), "-o", "args="])
+                .output()
+                .await?;
+            if output.stdout.is_empty() {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                anyhow::bail!(
+                    "Codex CLI did not stop cleanly; no further account switch was performed"
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
     }
     #[cfg(windows)]
     {
-        let _ = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/F"])
-            .status();
+        if !tokio::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string()])
+            .status()
+            .await?
+            .success()
+        {
+            anyhow::bail!("Could not stop the failed Codex CLI process");
+        }
+        Ok(())
     }
 }
 
@@ -2122,8 +2220,67 @@ exec $SHELL
 
 /// Perform one automated recovery cycle
 pub async fn check_and_recover_sessions() -> Result<Option<RecoveryEventNotification>> {
-    let settings = load_app_settings().unwrap_or_default();
-    let sessions = find_active_sessions()?;
+    let Ok(_guard) = RECOVERY_LOCK.try_lock() else {
+        return Ok(None);
+    };
+    let settings = load_app_settings()?;
+    if !settings.auto_retry_capacity_enabled && !settings.auto_switch_limit_enabled {
+        return Ok(None);
+    }
+    // A committed credential swap must not be repeated when model lookup or terminal launch fails.
+    let pending = {
+        let mut tracker = TRACKER
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Tracker poisoned"))?;
+        tracker
+            .pending_launches
+            .values_mut()
+            .find_map(|(session, account, last)| {
+                if last.elapsed() < Duration::from_secs(60) {
+                    return None;
+                }
+                *last = Instant::now();
+                Some((session.clone(), account.clone()))
+            })
+    };
+    if let Some((session, account)) = pending {
+        if load_accounts()?.active_account_id.as_deref() != Some(account.as_str())
+            || ensure_session_still_failed(&session).is_err()
+        {
+            TRACKER
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Tracker poisoned"))?
+                .pending_launches
+                .remove(&session.session_id);
+        } else {
+            let discovered = tokio::task::spawn_blocking(find_active_sessions).await??;
+            if discovered
+                .iter()
+                .any(|live| live.session_id == session.session_id)
+            {
+                TRACKER
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("Tracker poisoned"))?
+                    .pending_launches
+                    .remove(&session.session_id);
+                return Ok(None);
+            }
+            resume_cli_session(&session, &settings).await?;
+            TRACKER
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Tracker poisoned"))?
+                .pending_launches
+                .remove(&session.session_id);
+            return Ok(Some(RecoveryEventNotification {
+                event_type: "account_switched".into(),
+                session_id: session.session_id,
+                message: "Resumed session after retrying terminal launch on the selected account"
+                    .into(),
+                timestamp: Utc::now(),
+            }));
+        }
+    }
+    let sessions = tokio::task::spawn_blocking(find_active_sessions).await??;
 
     for session in sessions {
         // If the session has no error detected, skip it.
@@ -2136,6 +2293,18 @@ pub async fn check_and_recover_sessions() -> Result<Option<RecoveryEventNotifica
         let Some(error) = &session.last_error else {
             continue;
         };
+        let turn_key = recovery_turn_key(&session);
+        if TRACKER
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Tracker poisoned"))?
+            .failed_recoveries
+            .get(&session.session_id)
+            .is_some_and(|(turn, time)| {
+                turn == &turn_key && time.elapsed() < Duration::from_secs(60)
+            })
+        {
+            continue;
+        }
 
         match error.kind {
             SessionErrorKind::ServerOverloaded => {
@@ -2200,7 +2369,7 @@ pub async fn check_and_recover_sessions() -> Result<Option<RecoveryEventNotifica
                     if let Ok(mut t) = TRACKER.lock() {
                         t.capacity_retries.remove(&session.session_id);
                     }
-                    return handle_account_switch_for_session(&session, &settings).await;
+                    return recover_with_backoff(&session, &settings).await;
                 }
 
                 if should_retry {
@@ -2247,7 +2416,7 @@ pub async fn check_and_recover_sessions() -> Result<Option<RecoveryEventNotifica
                     continue;
                 }
 
-                return handle_account_switch_for_session(&session, &settings).await;
+                return recover_with_backoff(&session, &settings).await;
             }
         }
     }
@@ -2272,7 +2441,7 @@ async fn relaunch_cli_session(
     let session_effort = rollout_effort.or(config_effort);
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
-    let recovery_model = resolve_recovery_model(session_model.as_deref()).await.ok();
+    let recovery_model = Some(resolve_recovery_model(session_model.as_deref()).await?);
     #[cfg(windows)]
     let recovery_model: Option<String> = None;
 
@@ -2284,11 +2453,11 @@ async fn relaunch_cli_session(
         recovery_model.as_deref().unwrap_or(""),
         session_effort.as_deref().unwrap_or("")
     );
-    let _ = fs::write(&restart_file, restart_content);
+    fs::write(&restart_file, restart_content)?;
 
     // Terminate stale process that is stopped on limit error
     if session.pid > 0 {
-        terminate_process(session.pid);
+        terminate_process(session.pid).await?;
     }
 
     if is_goal {
@@ -2317,24 +2486,67 @@ async fn relaunch_cli_session(
         )?;
     }
 
-    if !is_goal {
-        let session_id_clone = session.session_id.clone();
-        let phrase_clone = phrase.to_string();
-        tokio::spawn(async move {
-            for attempt in 0..10 {
-                tokio::time::sleep(Duration::from_millis(800 + attempt * 400)).await;
-                if send_codex_queue_resume(&session_id_clone, &phrase_clone)
-                    .await
-                    .is_ok()
-                {
-                    println!("[AutoRecovery] Successfully queued '{phrase_clone}' to resumed session {session_id_clone}");
-                    break;
-                }
-            }
-        });
-    }
-
     Ok(consumed)
+}
+
+fn recovery_turn_key(session: &ActiveCodexSession) -> String {
+    session
+        .last_error
+        .as_ref()
+        .map(|e| e.turn_id.clone().unwrap_or_else(|| e.message.clone()))
+        .unwrap_or_default()
+}
+
+async fn recover_with_backoff(
+    session: &ActiveCodexSession,
+    settings: &AppSettings,
+) -> Result<Option<RecoveryEventNotification>> {
+    let result = handle_account_switch_for_session(session, settings).await;
+    if result.is_err() {
+        if let Ok(mut tracker) = TRACKER.lock() {
+            tracker.failed_recoveries.insert(
+                session.session_id.clone(),
+                (recovery_turn_key(session), Instant::now()),
+            );
+        }
+    }
+    result
+}
+
+fn ensure_session_still_failed(session: &ActiveCodexSession) -> Result<()> {
+    let path = session
+        .rollout_path
+        .as_deref()
+        .context("Session history is unavailable")?;
+    let latest = check_rollout_for_errors(Path::new(path), &session.session_id)
+        .context("Session has already continued; skipping recovery")?;
+    let expected = session
+        .last_error
+        .as_ref()
+        .context("No recoverable error")?;
+    if latest.kind != expected.kind || latest.turn_id != expected.turn_id {
+        anyhow::bail!("Session turn changed during recovery");
+    }
+    let settings = load_app_settings()?;
+    if (latest.kind == SessionErrorKind::UsageLimitExceeded && !settings.auto_switch_limit_enabled)
+        || (latest.kind == SessionErrorKind::ServerOverloaded
+            && !settings.auto_retry_capacity_enabled)
+    {
+        anyhow::bail!("Automatic recovery was disabled");
+    }
+    Ok(())
+}
+
+async fn resume_cli_session(session: &ActiveCodexSession, settings: &AppSettings) -> Result<()> {
+    let phrase = resolve_session_resume_phrase(&session.session_id, &settings.continue_phrase);
+    relaunch_cli_session(
+        session,
+        &phrase,
+        is_session_goal_active(&session.session_id),
+        settings,
+    )
+    .await?;
+    Ok(())
 }
 
 /// Switch account and relaunch a session that hit limits
@@ -2345,8 +2557,8 @@ async fn handle_account_switch_for_session(
     let store = load_accounts()?;
     let current_id = store.active_account_id.as_deref();
 
-    // Anti-cascade guard: if an account switch happened recently (within 20s),
-    // another active session's error is from the OLD account. Don't cascade-switch to yet another account!
+    // Compare the actual error time with the committed switch, even after a slow relaunch.
+    // An older error belongs to the previous account; a new error may need another switch.
     // Instead, simply give this session a `continue` so it runs on the newly active account.
     let recent_switch = {
         let Ok(tracker) = TRACKER.lock() else {
@@ -2355,8 +2567,15 @@ async fn handle_account_switch_for_session(
         tracker.last_account_switch.clone()
     };
 
-    if let Some((switch_time, _target_id, was_reset_credit, switched_session_id)) = recent_switch {
-        if switch_time.elapsed() < Duration::from_secs(20) {
+    if let Some((switch_time, switched_at, target_id, was_reset_credit, switched_session_id)) =
+        recent_switch
+    {
+        if current_id == Some(target_id.as_str())
+            && session
+                .last_error
+                .as_ref()
+                .is_some_and(|error| error.detected_at <= switched_at)
+        {
             // Anti-cascade: If this is the exact same session that just triggered the switch,
             // its rollout might still show the previous turn error while the new turn boots up.
             // Do NOT re-terminate or restart it!
@@ -2530,6 +2749,7 @@ async fn handle_account_switch_for_session(
                                         // don't immediately trigger a cascade switch to another account!
                                         tracker.last_account_switch = Some((
                                             Instant::now(),
+                                            Utc::now(),
                                             curr_acc.id.clone(),
                                             true,
                                             session.session_id.clone(),
@@ -2613,6 +2833,14 @@ async fn handle_account_switch_for_session(
         }
     }
 
+    if !settings.auto_redeem_reset_credits {
+        usage_map.retain(|_, usage| {
+            [usage.primary_used_percent, usage.secondary_used_percent]
+                .into_iter()
+                .flatten()
+                .all(|used| used < 100.0)
+        });
+    }
     let target_account = select_best_account(
         &store.accounts,
         current_id,
@@ -2650,6 +2878,7 @@ async fn handle_account_switch_for_session(
         Vec::new()
     };
 
+    ensure_session_still_failed(session)?;
     let desktop_reopen_token: Option<String> = if session.is_desktop {
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
@@ -2678,12 +2907,17 @@ async fn handle_account_switch_for_session(
         if updated_store.active_account_id.as_deref() != current_id {
             anyhow::bail!("Active account changed during auto recovery");
         }
+        let target = ensure_chatgpt_tokens_fresh_locked(&target).await?;
+        updated_store = load_accounts()?;
+        ensure_session_still_failed(session)?;
+        if !session.is_desktop {
+            terminate_process(session.pid).await?;
+        }
         if let Some(auth) = read_current_auth()? {
             if sync_active_account_tokens(&mut updated_store, &auth) {
                 save_accounts(&updated_store)?;
             }
         }
-        let target = ensure_chatgpt_tokens_fresh_locked(&target).await?;
         switch_to_account(&target)?;
         // Refresh may have saved rotated target credentials to accounts.json.
         updated_store = load_accounts()?;
@@ -2696,6 +2930,18 @@ async fn handle_account_switch_for_session(
     let target = match switch_result {
         Ok(target) => target,
         Err(error) => {
+            if !session.is_desktop {
+                if let Some(account) = load_accounts()?.active_account_id {
+                    if let Ok(mut tracker) = TRACKER.lock() {
+                        let mut stopped = session.clone();
+                        stopped.pid = 0;
+                        tracker.pending_launches.insert(
+                            session.session_id.clone(),
+                            (stopped, account, Instant::now()),
+                        );
+                    }
+                }
+            }
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             if let Some(token) = desktop_reopen_token {
                 let _ = crate::commands::reopen_closed_codex_desktop(token).await;
@@ -2708,18 +2954,43 @@ async fn handle_account_switch_for_session(
         }
     };
 
+    // Record the committed switch before any fallible model lookup or relaunch.
+    if let Ok(mut tracker) = TRACKER.lock() {
+        tracker.last_account_switch = Some((
+            Instant::now(),
+            Utc::now(),
+            target.id.clone(),
+            false,
+            session.session_id.clone(),
+        ));
+        tracker.handled_usage_limits.insert(
+            session.session_id.clone(),
+            session
+                .last_error
+                .as_ref()
+                .and_then(|e| e.turn_id.clone())
+                .unwrap_or_else(|| "default".to_string()),
+        );
+        if !session.is_desktop {
+            tracker.pending_launches.insert(
+                session.session_id.clone(),
+                (
+                    {
+                        let mut stopped = session.clone();
+                        stopped.pid = 0;
+                        stopped
+                    },
+                    target.id.clone(),
+                    Instant::now(),
+                ),
+            );
+        }
+    }
+
     let phrase = resolve_session_resume_phrase(&session.session_id, &settings.continue_phrase);
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     if let Some(token) = desktop_reopen_token {
-        if let Ok(mut tracker) = TRACKER.lock() {
-            tracker.last_account_switch = Some((
-                Instant::now(),
-                target.id.clone(),
-                false,
-                session.session_id.clone(),
-            ));
-        }
         let started = resume_desktop_after_handoff(token, &desktop_sessions, settings).await?;
         if let Ok(mut tracker) = TRACKER.lock() {
             for recovered in &desktop_sessions {
@@ -2760,29 +3031,14 @@ async fn handle_account_switch_for_session(
 
     let is_goal = is_session_goal_active(&session.session_id);
     let consumed = relaunch_cli_session(session, &phrase, is_goal, settings).await?;
+    if let Ok(mut tracker) = TRACKER.lock() {
+        tracker.pending_launches.remove(&session.session_id);
+    }
 
     send_desktop_notification(
         "Codex Account Switched",
         &format!("Switched to '{}'. Resuming session...", target.name),
     );
-
-    // Mark handled and record switch timestamp for anti-cascade
-    if let Ok(mut tracker) = TRACKER.lock() {
-        let turn_key = session
-            .last_error
-            .as_ref()
-            .and_then(|e| e.turn_id.clone())
-            .unwrap_or_else(|| "default".to_string());
-        tracker
-            .handled_usage_limits
-            .insert(session.session_id.clone(), turn_key);
-        tracker.last_account_switch = Some((
-            Instant::now(),
-            target.id.clone(),
-            false,
-            session.session_id.clone(),
-        ));
-    }
 
     let notification = RecoveryEventNotification {
         event_type: "account_switched".to_string(),
@@ -2815,7 +3071,10 @@ async fn handle_account_switch_for_session(
 /// Get active Codex sessions and auto-recovery status
 #[tauri::command]
 pub async fn get_auto_recovery_status() -> Result<AutoRecoveryStatus, String> {
-    let sessions = find_active_sessions().map_err(|e| e.to_string())?;
+    let sessions = tokio::task::spawn_blocking(find_active_sessions)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
     let last_event = TRACKER
         .lock()
         .map_err(|_| "Tracker poisoned".to_string())?
@@ -2978,6 +3237,89 @@ mod tests {
     use chrono::{Duration as ChronoDuration, TimeZone};
 
     #[test]
+    fn finished_rollout_matches_only_the_recovered_turn() {
+        let path =
+            std::env::temp_dir().join(format!("switcher-completion-{}", uuid::Uuid::new_v4()));
+        fs::write(
+            &path,
+            "{\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"earlier\"}}\n",
+        )
+        .unwrap();
+        assert!(!rollout_turn_finished(&path, "active"));
+        fs::write(
+            &path,
+            "{\"payload\":{\"type\":\"turn_aborted\",\"turn_id\":\"active\"}}\n",
+        )
+        .unwrap();
+        assert!(rollout_turn_finished(&path, "active"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn concurrent_recovery_cycle_skips_all_side_effects() {
+        let _guard = RECOVERY_LOCK.lock().await;
+        assert!(check_and_recover_sessions().await.unwrap().is_none());
+    }
+
+    #[test]
+    fn account_selection_rejects_unknown_and_exhausted_usage() {
+        let account = make_test_account("fallback", "Fallback", None);
+        let mut usage = HashMap::new();
+        for strategy in [
+            AutoSwitchStrategy::RoundRobin,
+            AutoSwitchStrategy::SmartBalanced,
+        ] {
+            assert!(select_best_account(
+                &[account.clone()],
+                None,
+                strategy,
+                &usage,
+                &HashMap::new(),
+                3,
+                &[],
+            )
+            .is_none());
+        }
+        let mut snapshot: UsageInfo = serde_json::from_value(serde_json::json!({
+            "account_id":"fallback", "primary_used_percent":10.0, "secondary_used_percent":100.0,
+            "credits":null, "has_credits":false, "unlimited_credits":false
+        }))
+        .unwrap();
+        usage.insert(account.id.clone(), snapshot.clone());
+        for strategy in [
+            AutoSwitchStrategy::RoundRobin,
+            AutoSwitchStrategy::SmartBalanced,
+        ] {
+            assert!(select_best_account(
+                &[account.clone()],
+                None,
+                strategy,
+                &usage,
+                &HashMap::new(),
+                3,
+                &[],
+            )
+            .is_none());
+        }
+        snapshot.secondary_used_percent = Some(40.0);
+        usage.insert(account.id.clone(), snapshot);
+        assert_eq!(
+            select_best_account(
+                &[account],
+                None,
+                AutoSwitchStrategy::SmartBalanced,
+                &usage,
+                &HashMap::new(),
+                3,
+                &[],
+            )
+            .unwrap()
+            .id,
+            "fallback"
+        );
+    }
+
+    #[test]
     fn desktop_app_server_is_not_a_recoverable_cli_session() {
         assert!(!is_supported_cli_command(
             "/Applications/ChatGPT.app/Contents/Resources/codex app-server --analytics-default-enabled"
@@ -3065,10 +3407,17 @@ mod tests {
             Some("high"),
             Path::new("/tmp/restart file"),
         );
-        assert!(command.contains("cd '/tmp/my work; touch /tmp/injected'"));
-        assert!(command.contains("'/tmp/Codex Bin/codex' resume --model 'gpt-6-astra; touch /tmp/injected' -c model_reasoning_effort='high' 'thread'\\'' id'"));
+        assert!(command.contains("'/tmp/my work; touch /tmp/injected'"));
+        assert!(command.contains("'/tmp/Codex Bin/codex'"));
+        assert!(command.contains("'gpt-6-astra; touch /tmp/injected'"));
+        assert!(command.contains("'thread'\\'' id'"));
         assert!(command.contains("'continue $(touch /tmp/injected) '\\''now'\\'''"));
-        assert!(command.contains("[ -f '/tmp/restart file' ]"));
+        assert!(command.contains("'/tmp/restart file'"));
+        assert!(Command::new("sh")
+            .args(["-n", "-c", &command])
+            .status()
+            .unwrap()
+            .success());
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]

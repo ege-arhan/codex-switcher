@@ -3,6 +3,7 @@
 pub mod account;
 pub mod account_stats;
 pub mod auto_recovery;
+pub mod claude;
 pub mod oauth;
 pub mod process;
 pub mod usage;

@@ -64,6 +64,10 @@ pub fn run() {
                             let message = format!("{error:#}");
                             if last_recovery_error.as_deref() != Some(&message) {
                                 eprintln!("[AutoRecovery] {message}");
+                                let _ = app_handle.emit("session-recovery-event", commands::auto_recovery::RecoveryEventNotification {
+                                    event_type: "recovery_failed".into(), session_id: String::new(),
+                                    message: message.clone(), timestamp: chrono::Utc::now(),
+                                });
                                 if let Some(home) = dirs::home_dir() {
                                     let path = home.join(".codex-switcher/auto-recovery.log");
                                     let mut options = std::fs::OpenOptions::new();
@@ -106,6 +110,15 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            commands::claude::list_claude_profiles,
+            commands::claude::import_current_claude_profile,
+            commands::claude::refresh_claude_profiles,
+            commands::claude::start_claude_login,
+            commands::claude::get_claude_login,
+            commands::claude::cancel_claude_login,
+            commands::claude::set_claude_auto_switch,
+            commands::claude::open_claude_code,
+            commands::claude::switch_claude_desktop,
             commands::get_display_settings,
             commands::set_tray_display_mode,
             commands::open_codex_app,

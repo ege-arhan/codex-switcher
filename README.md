@@ -162,6 +162,38 @@ prevents a graceful handoff, switching is deferred. A failed continuation after
 the account change is reported in the Switcher log. Windows desktop recovery is
 not supported by this feature yet.
 
+## Claude accounts (macOS)
+
+The **Claude hesapları** section imports the current Claude Code subscription
+with **Mevcut hesabı ekle**. **Add account** starts the installed Claude CLI's
+native login in a separate `CLAUDE_CONFIG_DIR` and displays its sign-in link.
+Complete the login with the requested email. Switcher stores profile metadata;
+Claude owns the credentials in Keychain or its private credential file.
+
+**Claude Code aç** selects a project and opens a managed terminal. With
+**Claude Code auto-switch** enabled, a native `StopFailure` rate-limit hook
+checks the saved accounts' current usage and resumes the same local session
+in that terminal with an available account. Five-hour, weekly and reported
+model limits must all permit work; unknown or stale usage is never assumed
+to be available. Expiring logins are renewed through the native CLI. Local
+projects, settings and skills are shared; logins remain separate. Ordinary
+`claude` processes opened outside Switcher keep their own account.
+
+**Desktop’a geç** closes Claude gracefully and moves the entire local desktop
+profile between account directories, preserving the outgoing profile without
+copying its contents. A journal supports recovery after an interrupted move.
+Sign in separately in Desktop when opening a new profile for the first time.
+Native Desktop account identity is matched to the imported Code accounts before
+moving a profile. If Desktop is signed into another account, import that account
+first. Normal cloud chats stay with their original account;
+automatic continuation of those chats is not supported.
+
+Claude usage uses the native CLI's read-only OAuth usage endpoint, which is not
+a public stable API. If the endpoint or native authentication format changes,
+Switcher reports the failure and keeps the current account. Accounts need a
+Claude Code version supporting `auth login`, `auth status` and `StopFailure`.
+Claude features are local desktop-only and are not exposed by the LAN dashboard.
+
 ## macOS Dock and Menu Bar Mode
 
 On macOS, Codex Switcher can either stay visible in the Dock or live only in the

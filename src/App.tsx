@@ -4,6 +4,7 @@ import { useAccounts } from "./hooks/useAccounts";
 import { useDesktopReopen } from "./hooks/useDesktopReopen";
 import { useCodexClosePreference } from "./hooks/useCodexClosePreference";
 import { SettingsModal } from "./components/SettingsModal";
+import { ClaudeAccounts } from "./components/ClaudeAccounts";
 import { finishForceClose, type DesktopReopenPreference } from "./lib/desktopReopen";
 import type { CodexClosePreference } from "./lib/codexClosePreference";
 import { useForceCloseCodexProcesses } from "./hooks/useForceCloseCodexProcesses";
@@ -668,6 +669,10 @@ function App() {
       const stop = await listen<{ message: string; event_type: string }>(
         "session-recovery-event",
         (event) => {
+          if (event.payload.event_type === "recovery_failed") {
+            showWarmupToast(event.payload.message, true);
+            return;
+          }
           // Only show notification and reload account state when an actual switch occurred
           if (
             event.payload.event_type === "account_switched" ||
@@ -1836,6 +1841,7 @@ function App() {
 
       {/* Main Content */}
       <main className="max-w-5xl mx-auto px-6 pt-4 pb-8">
+        <ClaudeAccounts />
         {loading && accounts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20">
             <div className="animate-spin h-10 w-10 border-2 border-gray-900 dark:border-gray-100 border-t-transparent rounded-full mb-4"></div>
