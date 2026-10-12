@@ -1176,6 +1176,39 @@ mod tests {
     }
 
     #[test]
+    fn desktop_identity_matches_an_imported_account_and_rejects_unknown_logins() {
+        let dir = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir_all(&dir).unwrap();
+        let p = ClaudeProfile {
+            id: uuid::Uuid::new_v4().to_string(),
+            email: "test@example.com".into(),
+            is_default: false,
+            account_uuid: Some("account-b".into()),
+            logged_in: true,
+            usage: None,
+            error: None,
+        };
+        let mut store = ClaudeProfiles {
+            profiles: vec![p.clone()],
+            ..Default::default()
+        };
+        fs::write(
+            dir.join("config.json"),
+            r#"{"lastKnownAccountUuid":"account-b"}"#,
+        )
+        .unwrap();
+        identify_live_desktop(&mut store, &dir).unwrap();
+        assert_eq!(store.active_desktop_id.as_deref(), Some(p.id.as_str()));
+        fs::write(
+            dir.join("config.json"),
+            r#"{"lastKnownAccountUuid":"unknown"}"#,
+        )
+        .unwrap();
+        assert!(identify_live_desktop(&mut store, &dir).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn desktop_switch_preserves_both_profiles_and_refuses_overwrite() {
         let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
         let live = root.join("live");
