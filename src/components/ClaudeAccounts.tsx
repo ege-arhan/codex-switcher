@@ -37,10 +37,13 @@ interface ClaudeLogin {
     error: string | null;
 }
 const button = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d97757] rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-600 dark:text-gray-100 dark:hover:bg-gray-800";
-export function ClaudeAccounts() {
+export function ClaudeAccounts({ onAccountCountChange }: { onAccountCountChange: (count: number) => void }) {
     const { t, locale } = useI18n();
     const [returnInput, setReturnInput] = useState("");
     const [store, setStore] = useState<ClaudeProfiles | null>(null);
+    useEffect(() => {
+        if (store) onAccountCountChange(store.profiles.length);
+    }, [store, onAccountCountChange]);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [email, setEmail] = useState("");

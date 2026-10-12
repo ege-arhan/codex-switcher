@@ -293,6 +293,7 @@ function App() {
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
   const navMenuRef = useRef<HTMLDivElement | null>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>(readStoredTheme);
+  const [claudeAccountCount, setClaudeAccountCount] = useState<number | null>(null);
   const [provider, setProvider] = useState<"codex" | "claude">("codex");
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const [closeBehaviorPromptOpen, setCloseBehaviorPromptOpen] = useState(false);
@@ -1851,9 +1852,9 @@ function App() {
         {quotaWaiting && <p role="status" className="mb-4 rounded-lg border border-amber-500 p-3 text-sm text-amber-900 dark:text-amber-200">{localizeMessage(quotaWaiting)}</p>}
         <nav aria-label={t("Accounts")} className="provider-nav mb-5 flex gap-1 border-b border-gray-200 dark:border-gray-800">
           <button type="button" aria-pressed={provider === "codex"} onClick={() => setProvider("codex")} className="provider-tab px-4 py-2.5 text-sm font-semibold">Codex <span className="ml-1 text-xs tabular-nums">{accounts.length}</span></button>
-          <button type="button" aria-pressed={provider === "claude"} onClick={() => setProvider("claude")} className="provider-tab px-4 py-2.5 text-sm font-semibold">Claude</button>
+          <button type="button" aria-pressed={provider === "claude"} onClick={() => setProvider("claude")} className="provider-tab px-4 py-2.5 text-sm font-semibold">Claude <span className="ml-1 text-xs tabular-nums">{claudeAccountCount ?? "…"}</span></button>
         </nav>
-        <div hidden={provider !== "claude"}><ClaudeAccounts /></div>
+        <div hidden={provider !== "claude"}><ClaudeAccounts onAccountCountChange={setClaudeAccountCount} /></div>
         <div hidden={provider !== "codex"}>
         {loading && accounts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20">
