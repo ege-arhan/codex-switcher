@@ -32,6 +32,8 @@
 - **Codex `/goal` Continuity** – Detect active or interrupted goal objectives from local SQLite state and automatically resume them using `/goal resume`
 - **Blocked Switch Recovery** – Detect running Codex sessions and offer a force-close flow before retrying the account switch
 - **Dual Login Mode** – Authenticate with ChatGPT OAuth or import existing `auth.json` files
+- **Interface Language** – Choose Turkish or English in Settings; the preference also applies to dates, usage labels and native menus
+- **Claude Accounts (macOS)** – Keep native Code logins and Desktop profiles separate, monitor quota, warm up accounts, and resume managed Code sessions after quota exhaustion
 
 ## Installation
 
@@ -164,19 +166,23 @@ not supported by this feature yet.
 
 ## Claude accounts (macOS)
 
-The **Claude hesapları** section imports the current Claude Code subscription
-with **Mevcut hesabı ekle**. **Hesap ekle** starts the installed Claude CLI's
+The **Claude accounts** section imports the current Claude Code subscription
+with **Import current account**. **Add account** starts the installed Claude CLI's
 native login in a separate `CLAUDE_CONFIG_DIR` and displays its sign-in link.
-Complete the login with the requested email. On macOS, **Safari’de aç** opens
-the original Claude authorization link in Safari so the Google steps stay in
-that browser. Do not move a Google intermediate consent URL between browsers.
+Complete the login with the requested email. **Copy link** lets you paste
+the original Claude authorization link into any browser. Complete the Google
+steps in that browser; do not copy a Google intermediate consent URL between
+browsers. If automatic completion does not return to the CLI, paste the final
+localhost callback URL or Claude's complete `code#state` into **Return URL or
+authorization code** and choose **Complete sign-in**. The return must match the
+current login; it is sent to the native CLI without logging or persisting it.
 The Switcher success screen appears only after the native CLI exits successfully
 and verifies the requested account. Switcher stores profile metadata;
 Claude owns the credentials in Keychain or its private credential file.
 
-**Claude Code aç** opens a managed terminal immediately in your home directory.
-**Proje klasörü seç** optionally selects and remembers a project directory;
-**Ana klasör** clears that choice. With
+**Open Claude Code** opens a managed terminal immediately in your home directory.
+**Choose project folder** optionally selects and remembers a project directory;
+**Home directory** clears that choice. With
 **Claude Code auto-switch** enabled, a native `StopFailure` rate-limit hook
 checks the saved accounts' current usage and resumes the same local session
 in that terminal with an available account. Five-hour, weekly and reported
@@ -185,7 +191,14 @@ to be available. Expiring logins are renewed through the native CLI. Local
 projects, settings and skills are shared; logins remain separate. Ordinary
 `claude` processes opened outside Switcher keep their own account.
 
-**Desktop’a geç** closes Claude gracefully and moves the entire local desktop
+**Warm up** sends one minimal Haiku request with tools, MCP servers, hooks and
+session persistence disabled. **Claude auto warm-up** checks for an unused,
+reset five-hour window every minute and starts it only with fresh verified
+quota. It skips active or exhausted windows, serializes requests, waits at least
+five hours between successful warm-ups, and backs off after failures. Warm-up
+uses a small amount of the account's subscription quota.
+
+**Switch Desktop** closes Claude gracefully and moves the entire local desktop
 profile between account directories, preserving the outgoing profile without
 copying its contents. A journal supports recovery after an interrupted move.
 Sign in separately in Desktop when opening a new profile for the first time.

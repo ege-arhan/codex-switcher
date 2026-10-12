@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { useCallback, useState } from "react";
 import type { CodexProcessInfo } from "../types";
 import { invokeBackend } from "../lib/platform";
@@ -38,25 +39,21 @@ export function useForceCloseCodexProcesses({
       const closedCount = Math.max(0, processCount - remainingCount);
 
       if (!latestProcessInfo) {
-        showToast("Could not verify that Codex closed. Account switching and reopening were skipped.", true);
+        showToast(t("Could not verify that Codex closed. Account switching and reopening were skipped."), true);
       } else if (result.targeted_count === 0) {
-        showToast("No running Codex processes found.");
+        showToast(t("No running Codex processes found."));
       } else if (remainingCount === 0) {
         showToast(
-          `${forceClose ? "Force closed" : "Closed"} ${processCount} Codex session${
-            processCount === 1 ? "" : "s"
-          }.`
+          t(forceClose ? "Force closed {count} Codex sessions." : "Closed {count} Codex sessions.", { count: processCount })
         );
       } else if (closedCount > 0) {
         showToast(
-          `${forceClose ? "Force closed" : "Closed"} ${closedCount}/${processCount} Codex sessions. ${remainingCount} still running.`,
+          t(forceClose ? "Force closed {closed}/{total} Codex sessions. {remaining} still running." : "Closed {closed}/{total} Codex sessions. {remaining} still running.", { closed: closedCount, total: processCount, remaining: remainingCount }),
           true
         );
       } else {
         showToast(
-          `Could not ${forceClose ? "force close" : "gracefully close"} ${remainingCount} Codex session${
-            remainingCount === 1 ? "" : "s"
-          }.`,
+          t(forceClose ? "Could not force close {count} Codex sessions." : "Could not gracefully close {count} Codex sessions.", { count: remainingCount }),
           true
         );
       }
@@ -64,7 +61,7 @@ export function useForceCloseCodexProcesses({
       return { processInfo: latestProcessInfo, reopenToken: result.reopen_token ?? null };
     } catch (err) {
       console.error("Failed to close Codex processes:", err);
-      showToast(`Close failed: ${formatError(err)}`, true);
+      showToast(t("Close failed: {error}", { error: formatError(err) }), true);
       return null;
     } finally {
       setConfirmOpen(false);

@@ -49,6 +49,8 @@ pub fn run() {
                 tray::setup(app.handle())?;
             }
 
+            commands::claude::spawn_auto_warmup(app.handle().clone());
+
             // Spawn background auto-recovery loop
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -110,11 +112,16 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            commands::language::get_ui_language,
+            commands::language::set_ui_language,
             commands::claude::list_claude_profiles,
             commands::claude::import_current_claude_profile,
             commands::claude::refresh_claude_profiles,
             commands::claude::start_claude_login,
             commands::claude::get_claude_login,
+            commands::claude::complete_claude_login,
+            commands::claude::warmup_claude_account,
+            commands::claude::set_claude_auto_warmup,
             commands::claude::cancel_claude_login,
             commands::claude::set_claude_auto_switch,
             commands::claude::open_claude_code,

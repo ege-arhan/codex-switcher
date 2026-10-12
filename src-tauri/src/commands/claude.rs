@@ -12,7 +12,7 @@ use std::{
     sync::{LazyLock, Mutex},
     time::{Duration, Instant},
 };
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClaudeUsage {
@@ -37,6 +37,8 @@ pub struct ClaudeProfile {
     #[serde(default)]
     pub logged_in: bool,
     #[serde(default)]
+    pub last_warmup_at: Option<i64>,
+    #[serde(default)]
     pub usage: Option<ClaudeUsage>,
     #[serde(default)]
     pub error: Option<String>,
@@ -49,6 +51,8 @@ pub struct ClaudeProfiles {
     pub active_desktop_id: Option<String>,
     #[serde(default)]
     pub auto_switch_enabled: bool,
+    #[serde(default)]
+    pub auto_warmup_enabled: bool,
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -61,6 +65,9 @@ pub struct ClaudeLogin {
 }
 
 static LOGIN: LazyLock<Mutex<Option<ClaudeLogin>>> = LazyLock::new(|| Mutex::new(None));
+static LOGIN_INPUT: LazyLock<Mutex<Option<(String, tokio::sync::mpsc::Sender<String>)>>> =
+    LazyLock::new(|| Mutex::new(None));
+static WARMUP_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn root() -> Result<PathBuf> {
     crate::auth::get_config_dir().map(|p| p.join("claude"))
@@ -475,7 +482,7 @@ fn identify_live_desktop(store: &mut ClaudeProfiles, live: &Path) -> Result<()> 
         if let Some(selected) = store.active_desktop_id.as_deref() {
             let expected = profile(store, selected)?;
             if expected.account_uuid.as_deref() != Some(identity.as_str()) {
-                bail!("Bu Desktop profilinde başka bir hesap açık. Claude’dan çıkış yapıp {} ile giriş yap; kayıtlı profiller korundu", expected.email);
+                bail!("Another account is open in this Desktop profile. Sign out of Claude and sign in with {}; saved profiles were preserved", expected.email);
             }
         } else {
             let matched = store.profiles.iter().find(|p| p.account_uuid.as_deref() == Some(&identity))
@@ -496,6 +503,7 @@ pub async fn import_current_claude_profile() -> Result<ClaudeProfiles, String> {
             account_uuid: None,
             desktop_status: String::new(),
             logged_in: false,
+            last_warmup_at: None,
             usage: None,
             error: None,
         };
@@ -561,7 +569,9 @@ pub async fn refresh_claude_profiles() -> Result<ClaudeProfiles, String> {
     let mut store = load().map_err(|e| e.to_string())?;
     for updated in updates {
         if let Some(p) = store.profiles.iter_mut().find(|p| p.id == updated.id) {
-            *p = updated;
+            p.logged_in = updated.logged_in;
+            p.usage = updated.usage;
+            p.error = updated.error;
         }
     }
     save(&store).map_err(|e| e.to_string())?;
@@ -630,6 +640,7 @@ async fn start_login_process(email: String) -> Result<ClaudeLogin> {
                 account_uuid: None,
                 desktop_status: String::new(),
                 logged_in: false,
+                last_warmup_at: None,
                 usage: None,
                 error: None,
             };
@@ -646,11 +657,13 @@ async fn start_login_process(email: String) -> Result<ClaudeLogin> {
     let mut cmd = tokio::process::Command::from(code_command(&p)?);
     let mut child = cmd
         .args(["auth", "login", "--claudeai", "--email", &p.email])
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()?;
+    let mut stdin = child.stdin.take().context("No login input")?;
+    let (input_tx, mut input_rx) = tokio::sync::mpsc::channel::<String>(1);
     let mut stdout = BufReader::new(child.stdout.take().context("No login output")?).lines();
     let mut stderr = BufReader::new(child.stderr.take().context("No login error output")?).lines();
     let pending = ClaudeLogin {
@@ -660,6 +673,10 @@ async fn start_login_process(email: String) -> Result<ClaudeLogin> {
         ..Default::default()
     };
     let flow_id = pending.flow_id.clone();
+    *LOGIN_INPUT
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Claude login input unavailable"))? =
+        Some((flow_id.clone(), input_tx));
     *LOGIN
         .lock()
         .map_err(|_| anyhow::anyhow!("Claude login state unavailable"))? = Some(pending.clone());
@@ -671,8 +688,14 @@ async fn start_login_process(email: String) -> Result<ClaudeLogin> {
             loop {
                 if LOGIN.lock().ok().and_then(|s| s.clone()).is_none_or(|l| l.status != "pending" || l.flow_id != flow_id) { bail!("Claude login cancelled"); }
                 tokio::select! {
-                    line = stdout.next_line(), if out_open => { match line? { Some(line) => update_login_url(&line), None => out_open = false } }
-                    line = stderr.next_line(), if err_open => { match line? { Some(line) => update_login_url(&line), None => err_open = false } }
+                    code = input_rx.recv() => {
+                        if let Some(code) = code {
+                            stdin.write_all(format!("{code}\n").as_bytes()).await?;
+                            stdin.flush().await?;
+                        }
+                    }
+                    line = stdout.next_line(), if out_open => { match line? { Some(line) => update_login_url(&flow_id, &line), None => out_open = false } }
+                    line = stderr.next_line(), if err_open => { match line? { Some(line) => update_login_url(&flow_id, &line), None => err_open = false } }
                     status = child.wait() => { if !status?.success() { bail!("Claude login failed; try the native login again"); } break; }
                     _ = tokio::time::sleep_until(deadline) => bail!("Claude login timed out"),
                     _ = tokio::time::sleep(Duration::from_millis(250)) => {}
@@ -692,6 +715,11 @@ async fn start_login_process(email: String) -> Result<ClaudeLogin> {
             Ok(())
         }.await;
         let _ = child.kill().await;
+        if let Ok(mut input) = LOGIN_INPUT.lock() {
+            if input.as_ref().is_some_and(|(id, _)| id == &flow_id) {
+                *input = None;
+            }
+        }
         if let Ok(mut state) = LOGIN.lock() {
             if let Some(state) = state.as_mut().filter(|s| s.flow_id == flow_id) {
                 state.status = if result.is_ok() { "complete" } else { "failed" }.into();
@@ -703,10 +731,101 @@ async fn start_login_process(email: String) -> Result<ClaudeLogin> {
     Ok(pending)
 }
 
-fn update_login_url(line: &str) {
+fn parse_login_return(input: &str, auth_url: &str) -> Result<String> {
+    let input = input.trim();
+    if input.is_empty() || input.len() > 8192 || input.chars().any(char::is_whitespace) {
+        bail!("Paste the final callback URL or the complete code#state");
+    }
+    let auth = url::Url::parse(auth_url)?;
+    let expected_state = auth
+        .query_pairs()
+        .find(|(key, _)| key == "state")
+        .map(|(_, value)| value.into_owned())
+        .context("This Claude login is no longer pending; generate a new link")?;
+    let (code, state) = if input.starts_with("http://") || input.starts_with("https://") {
+        let callback = url::Url::parse(input)
+            .context("Paste the final callback URL or the complete code#state")?;
+        let redirect = auth
+            .query_pairs()
+            .find(|(key, _)| key == "redirect_uri")
+            .map(|(_, value)| value.into_owned())
+            .context("The return link does not belong to this login")?;
+        let redirect = url::Url::parse(&redirect)?;
+        if callback.origin() != redirect.origin()
+            || callback.path() != redirect.path()
+            || callback.username() != ""
+            || callback.password().is_some()
+        {
+            bail!("The return link does not belong to this login");
+        }
+        let mut codes = callback
+            .query_pairs()
+            .filter(|(key, _)| key == "code")
+            .map(|(_, value)| value.into_owned());
+        let code = codes
+            .next()
+            .context("Paste the final callback URL or the complete code#state")?;
+        if codes.next().is_some() {
+            bail!("The return link does not belong to this login");
+        }
+        let mut states = callback
+            .query_pairs()
+            .filter(|(key, _)| key == "state")
+            .map(|(_, value)| value.into_owned());
+        let state = states
+            .next()
+            .context("Paste the final callback URL or the complete code#state")?;
+        if states.next().is_some() {
+            bail!("The return link does not belong to this login");
+        }
+        (code, state)
+    } else {
+        let (code, state) = input
+            .split_once('#')
+            .context("Paste the final callback URL or the complete code#state")?;
+        (code.to_owned(), state.to_owned())
+    };
+    if state != expected_state {
+        bail!("The authorization state does not match this login");
+    }
+    if code.is_empty()
+        || code.contains('#')
+        || code.chars().any(|c| c.is_whitespace() || c.is_control())
+    {
+        bail!("Paste the final callback URL or the complete code#state");
+    }
+    Ok(format!("{code}#{state}"))
+}
+
+#[tauri::command]
+pub async fn complete_claude_login(flow_id: String, input: String) -> Result<(), String> {
+    let login = get_claude_login()?
+        .filter(|l| l.status == "pending" && l.flow_id == flow_id)
+        .ok_or("This Claude login is no longer pending; generate a new link")?;
+    let code = parse_login_return(
+        &input,
+        login
+            .auth_url
+            .as_deref()
+            .ok_or("Claude login is unavailable")?,
+    )
+    .map_err(|e| e.to_string())?;
+    let sender = LOGIN_INPUT
+        .lock()
+        .map_err(|_| "Claude login input unavailable")?
+        .as_ref()
+        .filter(|(id, _)| id == &flow_id)
+        .map(|(_, sender)| sender.clone())
+        .ok_or("This Claude login is no longer pending; generate a new link")?;
+    sender
+        .try_send(code)
+        .map_err(|_| "Claude could not receive the authorization code; generate a new link".into())
+}
+
+fn update_login_url(flow_id: &str, line: &str) {
     if let Some(url) = extract_auth_url(line) {
         if let Ok(mut login) = LOGIN.lock() {
-            if let Some(login) = login.as_mut() {
+            if let Some(login) = login.as_mut().filter(|l| l.flow_id == flow_id && l.status == "pending") {
                 login.auth_url = Some(url);
             }
         }
@@ -742,6 +861,158 @@ pub async fn set_claude_auto_switch(enabled: bool) -> Result<ClaudeProfiles, Str
     store.auto_switch_enabled = enabled;
     save(&store).map_err(|e| e.to_string())?;
     Ok(store)
+}
+
+fn warmup_due(p: &ClaudeProfile, now: i64) -> bool {
+    if !eligible(p, &HashSet::new(), now) {
+        return false;
+    }
+    let usage = p.usage.as_ref().unwrap();
+    usage.five_hour_used == 0.0
+        && usage.five_hour_resets_at.as_deref().map_or(true, |reset| {
+            chrono::DateTime::parse_from_rfc3339(reset).is_ok_and(|date| date.timestamp() <= now)
+        })
+        && p.last_warmup_at.is_none_or(|last| now >= last + 5 * 3600)
+}
+
+fn warmup_command(p: &ClaudeProfile) -> Result<Command> {
+    uuid::Uuid::parse_str(&p.id).context("Invalid Claude profile ID")?;
+    let dir = root()?.join(&p.id).join("warmup");
+    private_dir(&dir)?;
+    let mut command = code_command(p)?;
+    command.current_dir(dir).args([
+        "-p",
+        "Reply with exactly OK.",
+        "--model",
+        "haiku",
+        "--tools",
+        "",
+        "--strict-mcp-config",
+        "--mcp-config",
+        "{\"mcpServers\":{}}",
+        "--setting-sources",
+        "",
+        "--settings",
+        "{\"disableAllHooks\":true}",
+        "--disable-slash-commands",
+        "--no-session-persistence",
+        "--max-turns",
+        "1",
+        "--output-format",
+        "json",
+    ]);
+    Ok(command)
+}
+
+async fn warmup_native(p: &ClaudeProfile) -> Result<()> {
+    let probe = p.clone();
+    let status = tokio::task::spawn_blocking(move || login_status(&probe)).await??;
+    if status.get("loggedIn").and_then(Value::as_bool) != Some(true)
+        || !status
+            .get("email")
+            .and_then(Value::as_str)
+            .is_some_and(|e| e.eq_ignore_ascii_case(&p.email))
+    {
+        bail!("Sign in to this Claude account first");
+    }
+    let usage = fetch_usage(p).await?;
+    let mut verified = p.clone();
+    verified.logged_in = true;
+    verified.error = None;
+    verified.usage = Some(usage);
+    if !eligible(&verified, &HashSet::new(), chrono::Utc::now().timestamp()) {
+        bail!("No verified Claude quota is available for warm-up");
+    }
+    let mut command = tokio::process::Command::from(warmup_command(p)?);
+    let child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()?;
+    let output = tokio::time::timeout(Duration::from_secs(90), child.wait_with_output())
+        .await
+        .context("Claude warm-up timed out")??;
+    if !output.status.success() {
+        bail!("Claude warm-up failed");
+    }
+    let response: Value =
+        serde_json::from_slice(&output.stdout).context("Claude warm-up was not confirmed")?;
+    if response.get("is_error").and_then(Value::as_bool) != Some(false)
+        || response
+            .get("result")
+            .and_then(Value::as_str)
+            .is_none_or(|result| result.trim() != "OK")
+    {
+        bail!("Claude warm-up was not confirmed");
+    }
+    let fresh = fetch_usage(p).await.ok();
+    let _lock = lock_store()?;
+    let mut store = load()?;
+    if let Some(saved) = store.profiles.iter_mut().find(|saved| saved.id == p.id) {
+        saved.last_warmup_at = Some(chrono::Utc::now().timestamp());
+        saved.usage = fresh;
+        saved.error = None;
+    }
+    save(&store)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn warmup_claude_account(profile_id: String) -> Result<ClaudeProfiles, String> {
+    let _guard = WARMUP_LOCK
+        .try_lock()
+        .map_err(|_| "Claude warm-up is already running")?;
+    let store = load().map_err(|e| e.to_string())?;
+    let p = profile(&store, &profile_id)
+        .map_err(|e| e.to_string())?
+        .clone();
+    warmup_native(&p).await.map_err(|e| e.to_string())?;
+    list_claude_profiles().await
+}
+
+#[tauri::command]
+pub async fn set_claude_auto_warmup(enabled: bool) -> Result<ClaudeProfiles, String> {
+    let _lock = lock_store().map_err(|e| e.to_string())?;
+    let mut store = load().map_err(|e| e.to_string())?;
+    store.auto_warmup_enabled = enabled;
+    save(&store).map_err(|e| e.to_string())?;
+    Ok(store)
+}
+
+pub fn spawn_auto_warmup(app: tauri::AppHandle) {
+    use tauri::Emitter;
+    tauri::async_runtime::spawn(async move {
+        let mut timer = tokio::time::interval(Duration::from_secs(60));
+        let mut retry_after: HashMap<String, i64> = HashMap::new();
+        loop {
+            timer.tick().await;
+            if !load().is_ok_and(|store| store.auto_warmup_enabled) {
+                continue;
+            }
+            let Ok(_guard) = WARMUP_LOCK.try_lock() else {
+                continue;
+            };
+            let Ok(store) = refresh_claude_profiles().await else {
+                continue;
+            };
+            for p in store.profiles {
+                if !load().is_ok_and(|store| store.auto_warmup_enabled) {
+                    break;
+                }
+                let now = chrono::Utc::now().timestamp();
+                if retry_after.get(&p.id).is_some_and(|after| now < *after) || !warmup_due(&p, now)
+                {
+                    continue;
+                }
+                let result = warmup_native(&p).await;
+                if result.is_err() {
+                    retry_after.insert(p.id.clone(), now + 300);
+                }
+                let _ = app.emit("claude-warmup-event", json!({"profileId":p.id,"ok":result.is_ok(),"error":result.err().map(|e| e.to_string())}));
+            }
+        }
+    });
 }
 
 fn quote(s: &str) -> String {
@@ -1171,23 +1442,63 @@ mod tests {
     use super::*;
 
     #[test]
-    fn safari_opening_is_scoped_to_claude_login_urls() {
-        let config: Value =
-            serde_json::from_str(include_str!("../../capabilities/default.json")).unwrap();
-        let scoped = config["permissions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|v| v["identifier"] == "opener:allow-open-url")
-            .unwrap();
-        let urls = scoped["allow"].as_array().unwrap();
-        assert_eq!(urls.len(), 2);
-        for entry in urls {
-            assert_eq!(entry["app"], "Safari");
-            let url = entry["url"].as_str().unwrap();
-            assert!(url.ends_with("authorize*"));
-            assert!(extract_auth_url(url.trim_end_matches('*')).is_some());
+    fn pasted_login_return_is_bound_to_the_current_flow() {
+        let auth = "https://claude.ai/oauth/authorize?state=current&redirect_uri=http%3A%2F%2Flocalhost%3A4321%2Fcallback";
+        assert_eq!(
+            parse_login_return("abc#current", auth).unwrap(),
+            "abc#current"
+        );
+        assert_eq!(
+            parse_login_return(
+                "http://localhost:4321/callback?code=abc&state=current",
+                auth
+            )
+            .unwrap(),
+            "abc#current"
+        );
+        for value in [
+            "abc#old",
+            "abc\n#current",
+            "abc\0#current",
+            "http://evil.example/callback?code=abc&state=current",
+            "http://localhost:9999/callback?code=abc&state=current",
+            "http://localhost:4321/callback?code=abc&code=def&state=current",
+        ] {
+            assert!(parse_login_return(value, auth).is_err());
         }
+    }
+
+    #[test]
+    fn automatic_warmup_skips_active_stale_exhausted_or_recently_warmed_accounts() {
+        let now = chrono::Utc::now().timestamp();
+        let mut p = ClaudeProfile {
+            id: uuid::Uuid::new_v4().to_string(),
+            email: "test@example.com".into(),
+            is_default: false,
+            account_uuid: None,
+            desktop_status: String::new(),
+            logged_in: true,
+            last_warmup_at: None,
+            error: None,
+            usage: Some(
+                parse_usage(&json!({"five_hour":{"utilization":0},"seven_day":{"utilization":5}}))
+                    .unwrap(),
+            ),
+        };
+        assert!(warmup_due(&p, now));
+        assert!(!warmup_due(&p, now + 61));
+        p.last_warmup_at = Some(now);
+        assert!(!warmup_due(&p, now));
+        p.last_warmup_at = None;
+        p.usage.as_mut().unwrap().five_hour_resets_at = Some(
+            chrono::DateTime::from_timestamp(now + 3600, 0)
+                .unwrap()
+                .to_rfc3339(),
+        );
+        assert!(!warmup_due(&p, now));
+        p.usage.as_mut().unwrap().five_hour_resets_at = None;
+        p.usage.as_mut().unwrap().seven_day_used = 100.;
+        assert!(!warmup_due(&p, now));
     }
 
     #[test]
@@ -1199,6 +1510,7 @@ mod tests {
             account_uuid: None,
             desktop_status: String::new(),
             logged_in: true,
+            last_warmup_at: None,
             error: None,
             usage: Some(
                 parse_usage(
@@ -1259,6 +1571,7 @@ mod tests {
             account_uuid: Some("account-b".into()),
             desktop_status: String::new(),
             logged_in: true,
+            last_warmup_at: None,
             usage: None,
             error: None,
         };
