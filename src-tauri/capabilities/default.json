@@ -11,6 +11,13 @@
     "core:window:allow-start-dragging",
     "core:window:allow-toggle-maximize",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://claude.ai/oauth/authorize*", "app": "Safari" },
+        { "url": "https://claude.com/cai/oauth/authorize*", "app": "Safari" }
+      ]
+    },
     "dialog:default",
     "updater:default",
     "process:default"

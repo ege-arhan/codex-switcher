@@ -33,10 +33,10 @@ export async function invokeBackend<T>(
   return payload as T;
 }
 
-export async function openExternalUrl(url: string): Promise<void> {
+export async function openExternalUrl(url: string, openWith?: "Safari"): Promise<void> {
   if (isTauriRuntime()) {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
-    await openUrl(url);
+    await openUrl(url, openWith);
     return;
   }
 

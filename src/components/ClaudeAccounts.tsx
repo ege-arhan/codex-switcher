@@ -209,10 +209,12 @@ export function ClaudeAccounts() {
               onChange={(e) => setEmail(e.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 dark:border-gray-600" />
             <button type="submit" className={`${button} mt-3`} disabled={busy || login?.status === "pending"}>{busy ? "Hazırlanıyor…" : "Giriş bağlantısı oluştur"}</button>
           </form>
-          {login?.status === "pending" && <p role="status" className="mt-3 text-sm">Claude’un resmi girişinin tamamlanması bekleniyor…</p>}
+          {login?.status === "pending" && <p role="status" className="mt-3 text-sm">Code girişinin bu Mac’e kaydedilmesi bekleniyor. Tarayıcıdaki başarı mesajından sonra bu pencereye dön; giriş kaydedildiğinde burada onaylanacak.</p>}
           {login?.auth_url && <div className="mt-3 space-y-2">
             <button className={button} onClick={() => void openExternalUrl(login.auth_url!).catch((e) => setError(String(e)))}>Giriş bağlantısını aç</button>{" "}
+            {mac && <button className={button} onClick={() => void openExternalUrl(login.auth_url!, "Safari").catch((e) => setError(String(e)))}>Safari’de aç</button>}{" "}
             <button className={button} onClick={() => void navigator.clipboard.writeText(login.auth_url!).then(() => setCopied(true)).catch((e) => setError(String(e)))}>{copied ? "Kopyalandı" : "Bağlantıyı kopyala"}</button>
+            <p className="text-xs text-gray-600 dark:text-gray-300">Google’a bu bağlantıyı açtığın tarayıcıda devam et. Google’ın ara onay adresini başka tarayıcıya kopyalama.</p>
             <p className="break-all text-xs text-gray-600 dark:text-gray-300">{login.auth_url}</p>
           </div>}
           <p className="mt-3 text-xs text-gray-600 dark:text-gray-300">Bu bağlantı Claude Code içindir. Desktop girişi karttaki “Desktop girişi” düğmesiyle Claude uygulamasında tamamlanır.</p>

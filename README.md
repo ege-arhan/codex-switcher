@@ -167,7 +167,11 @@ not supported by this feature yet.
 The **Claude hesapları** section imports the current Claude Code subscription
 with **Mevcut hesabı ekle**. **Hesap ekle** starts the installed Claude CLI's
 native login in a separate `CLAUDE_CONFIG_DIR` and displays its sign-in link.
-Complete the login with the requested email. Switcher stores profile metadata;
+Complete the login with the requested email. On macOS, **Safari’de aç** opens
+the original Claude authorization link in Safari so the Google steps stay in
+that browser. Do not move a Google intermediate consent URL between browsers.
+The Switcher success screen appears only after the native CLI exits successfully
+and verifies the requested account. Switcher stores profile metadata;
 Claude owns the credentials in Keychain or its private credential file.
 
 **Claude Code aç** opens a managed terminal immediately in your home directory.

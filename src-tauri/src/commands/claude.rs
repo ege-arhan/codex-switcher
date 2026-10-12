@@ -1171,6 +1171,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn safari_opening_is_scoped_to_claude_login_urls() {
+        let config: Value =
+            serde_json::from_str(include_str!("../../capabilities/default.json")).unwrap();
+        let scoped = config["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["identifier"] == "opener:allow-open-url")
+            .unwrap();
+        let urls = scoped["allow"].as_array().unwrap();
+        assert_eq!(urls.len(), 2);
+        for entry in urls {
+            assert_eq!(entry["app"], "Safari");
+            let url = entry["url"].as_str().unwrap();
+            assert!(url.ends_with("authorize*"));
+            assert!(extract_auth_url(url.trim_end_matches('*')).is_some());
+        }
+    }
+
+    #[test]
     fn only_fresh_verified_accounts_with_quota_are_eligible() {
         let mut p = ClaudeProfile {
             id: "b".into(),
