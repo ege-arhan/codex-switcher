@@ -1271,7 +1271,8 @@
       "**Do** keep identity, remaining quota and the next action visible before advanced settings.",
       "**Do** preserve visible keyboard focus, explicit status labels and locale-aware values.",
       "**Do** allow action rows and translated copy to wrap inside the shared content width.",
-      "**Do** place the selected Code account under Active account for both providers, preserving the separate Claude Desktop profile status."
+      "**Do** place the selected Code account under Active account for both providers, preserving the separate Claude Desktop profile status.",
+      "**Do** show Grok / Cursor unified usage as one native Cursor-reported pool; keep unsupported desktop continuation and warm-up disabled and explain the manual closed-app switch."
     ],
     "donts": [
       "**Don't** spread XP or Aero chrome into the other themes.",

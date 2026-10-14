@@ -200,9 +200,9 @@ button, select, input:not([type="checkbox"]):not([type="radio"]), textarea { bor
 @media (max-width: 420px) { .theme-options { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
 
-:root .account-card--codex[data-active="true"] { border-color: #009d71; }
+:root .account-card--codex[data-active="true"], :root .account-card--cursor[data-active="true"] { border-color: #009d71; }
 :root .account-card--claude[data-active="true"] { border-color: #c36843; }
-:root.dark .account-card--codex[data-active="true"] { border-color: #40cfa4; }
+:root.dark .account-card--codex[data-active="true"], :root.dark .account-card--cursor[data-active="true"] { border-color: #40cfa4; }
 :root.dark .account-card--claude[data-active="true"] { border-color: #e19474; }
 
 ::selection { background: #b9d9ff; color: #142d4b; }

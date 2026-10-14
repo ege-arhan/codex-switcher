@@ -4,10 +4,11 @@ import { getLanguage, getLocale, LANGUAGE_STORAGE_KEY, normalizeLanguage, transl
 import { shellTranslations } from "../src/lib/i18nShell.ts";
 import { componentTranslations } from "../src/lib/i18nComponents.ts";
 import { themeAppearanceTranslations } from "../src/lib/i18nThemeAppearance.ts";
+import { cursorTranslations } from "../src/lib/i18nCursor.ts";
 import { claudeTranslations } from "../src/lib/i18nClaude.ts";
 import { localizeProductMessage } from "../src/lib/i18nMessages.ts";
 
-const dictionary = { ...shellTranslations, ...componentTranslations, ...claudeTranslations, ...themeAppearanceTranslations };
+const dictionary = { ...shellTranslations, ...componentTranslations, ...claudeTranslations, ...themeAppearanceTranslations, ...cursorTranslations };
 
 test("language preference persists and selects matching date and number locales", () => {
   const values = new Map<string, string>();
@@ -57,4 +58,10 @@ test("Claude usage throttling is localized without asking for reauthentication",
   const tr = (source: string, params?: Record<string, string | number>) => translate(source, "tr", dictionary, params);
   assert.match(localizeProductMessage(source, tr), /yeniden giriş yapman gerekmiyor/);
   assert.equal(localizeProductMessage("Claude usage check failed (HTTP 503)", tr), "Claude kullanımı kontrol edilemedi (HTTP 503)");
+});
+
+test("Cursor native request errors localize while preserving HTTP status", () => {
+  const tr = (source: string, params?: Record<string, string | number>) => translate(source, "tr", dictionary, params);
+  assert.match(localizeProductMessage("Cursor request returned HTTP 503", tr), /503/);
+  assert.notEqual(localizeProductMessage("Cursor request returned HTTP 503", tr), "Cursor request returned HTTP 503");
 });

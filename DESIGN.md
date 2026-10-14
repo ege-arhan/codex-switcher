@@ -301,3 +301,7 @@ A 6px rounded track carries the remaining percentage, window label and reset tim
 Not canonized: the build's 10–11px tertiary helper text and faint loading placeholders are inherited density/legibility debt, not reusable text roles; explicit black/neutral menu exceptions are not a second theme system. The OS screen-sharing overlay is outside the application. Documentation follows the implemented source. Theme state tests cover all fourteen identity/mode combinations and legacy selections; a complete independent visual/contrast audit is not implied.
 
 Both providers group the selected Code account under Active account, followed by Other accounts. Claude keeps its separate Desktop profile label; provider color marks the active card in both appearances.
+
+## Grok / Cursor accounts
+
+The shared provider header includes a combined Grok / Cursor tab and account count. Cursor Desktop account cards retain Active account / Other accounts hierarchy, verified plan names and the native Cursor usage percentage with reset time. Unified subscriptions are explicitly labeled as a shared pool; missing percentages remain unknown. Browser-neutral PKCE login lives in the native add-account dialog. Manual Desktop switching requires Cursor to be closed and changes authentication fields only, preserving workspace/history/settings. Unsupported Desktop automatic continuation and warm-up are disabled with explanatory labels; no independent Grok usage pool is invented.

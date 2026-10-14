@@ -9,6 +9,8 @@ export function localizeProductMessage(message: string, t: (source: string, para
     [/^Server overloaded\. Sent automatic retry \(attempt (\d+)\/(\d+)\) with '(.*)'$/, m => t("Server overloaded. Sent automatic retry (attempt {attempt}/{max}) with '{phrase}'", { attempt: m[1], max: m[2], phrase: m[3] })],
     [/^Automatic recovery failed: (.*)$/s, m => t("Automatic recovery failed: {error}", { error: m[1] })],
     [/^Claude usage check failed \(HTTP (\d+)\)$/, m => t("Claude usage check failed (HTTP {status})", { status: m[1] })],
+    [/^Cursor request returned HTTP (\d+)$/, m => t("Cursor request returned HTTP {status}", { status: m[1] })],
+    [/^Cursor login returned HTTP (\d+)$/, m => t("Cursor login returned HTTP {status}", { status: m[1] })],
   ];
   for (const [pattern, format] of patterns) { const match = message.match(pattern); if (match) return format(match); }
   return t(message);

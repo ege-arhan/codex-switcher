@@ -6,6 +6,7 @@ import { useAccounts } from "./hooks/useAccounts";
 import { useDesktopReopen } from "./hooks/useDesktopReopen";
 import { useCodexClosePreference } from "./hooks/useCodexClosePreference";
 import { SettingsModal } from "./components/SettingsModal";
+import { CursorAccounts, type CursorAccountsHandle, type CursorToolbarState } from "./components/CursorAccounts";
 import { ClaudeAccounts, type ClaudeAccountsHandle, type ClaudeToolbarState } from "./components/ClaudeAccounts";
 import { finishForceClose, type DesktopReopenPreference } from "./lib/desktopReopen";
 import type { CodexClosePreference } from "./lib/codexClosePreference";
@@ -298,11 +299,17 @@ function App() {
   const [claudeToolbar, setClaudeToolbar] = useState<ClaudeToolbarState>({ ready: false, busy: false, autoSwitch: false, autoWarmup: false });
   const [claudeMasked, setClaudeMasked] = useState(false);
   const [claudeAccountCount, setClaudeAccountCount] = useState<number | null>(null);
-  const [provider, setProvider] = useState<"codex" | "claude">("codex");
-  const providerAutoSwitch = provider === "codex" ? appSettings?.auto_switch_limit_enabled ?? false : claudeToolbar.autoSwitch;
-  const providerAutoWarmup = provider === "codex" ? autoWarmupAllEnabled : claudeToolbar.autoWarmup;
-  const providerBusy = provider === "codex" ? isRefreshing || isWarmingAll : claudeToolbar.busy;
+  const cursorAccountsRef = useRef<CursorAccountsHandle>(null);
+  const [cursorToolbar, setCursorToolbar] = useState<CursorToolbarState>({ ready: false, busy: false });
+  const [cursorAccountCount, setCursorAccountCount] = useState<number | null>(null);
+  const [cursorMasked, setCursorMasked] = useState(false);
+  const [provider, setProvider] = useState<"codex" | "claude" | "cursor">("codex");
+  const providerAutoSwitch = provider === "codex" ? appSettings?.auto_switch_limit_enabled ?? false : provider === "claude" && claudeToolbar.autoSwitch;
+  const providerAutoWarmup = provider === "codex" ? autoWarmupAllEnabled : provider === "claude" && claudeToolbar.autoWarmup;
+  const providerBusy = provider === "codex" ? isRefreshing || isWarmingAll : provider === "claude" ? claudeToolbar.busy : cursorToolbar.busy;
   const runClaude = (command: Parameters<ClaudeAccountsHandle["run"]>[0]) => { void claudeAccountsRef.current?.run(command); };
+  const runCursor = (command: Parameters<CursorAccountsHandle["run"]>[0]) => { void cursorAccountsRef.current?.run(command); };
+  const otherProviderReady = provider === "claude" ? claudeToolbar.ready : cursorToolbar.ready;
   useEffect(() => { setIsNavMenuOpen(false); setIsActionsMenuOpen(false); setIsTimedWarmupOpen(false); }, [provider]);
 
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
@@ -1513,13 +1520,13 @@ function App() {
                     aria-label={t("Automatic account switching on usage limit")}
                     aria-checked={providerAutoSwitch}
                     onClick={() => provider === "codex" ? void handleToggleAutoSwitch() : runClaude("auto-switch")}
-                    disabled={provider === "codex" ? !appSettings || autoSwitchSaving : !claudeToolbar.ready || claudeToolbar.busy}
+                    disabled={provider === "codex" ? !appSettings || autoSwitchSaving : provider === "cursor" || !claudeToolbar.ready || claudeToolbar.busy}
                     className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
                       providerAutoSwitch
                         ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300"
                         : "border-gray-200 bg-gray-100 text-gray-600 hover:bg-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
                     }`}
-                    title={t("Switch accounts automatically when the active account reaches its usage limit")}
+                    title={provider === "cursor" ? t("Automatic continuation is unavailable for Cursor Desktop") : t("Switch accounts automatically when the active account reaches its usage limit")}
                   >
                     <span
                       className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${
@@ -1533,7 +1540,7 @@ function App() {
                         }`}
                       />
                     </span>
-                    <span className="select-none"> {t("Auto-switch")} {(provider === "codex" ? !!appSettings : claudeToolbar.ready) ? (providerAutoSwitch ? t("On") : t("Off")) : "…"}
+                    <span className="select-none"> {t("Auto-switch")} {(provider === "codex" ? !!appSettings : otherProviderReady) ? (providerAutoSwitch ? t("On") : t("Off")) : "…"}
                     </span>
                   </button>}
                   {processInfo && provider === "codex" && (
@@ -1582,12 +1589,12 @@ function App() {
             <div className="flex flex-wrap items-center gap-2 shrink-0 md:ml-4 md:w-max md:flex-nowrap md:justify-end">
               <>
               <button
-                onClick={() => provider === "codex" ? toggleMaskAll() : setClaudeMasked(value => !value)}
+                onClick={() => provider === "codex" ? toggleMaskAll() : provider === "claude" ? setClaudeMasked(value => !value) : setCursorMasked(value => !value)}
                 className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 shrink-0"
-                aria-label={(provider === "codex" ? allMasked : claudeMasked) ? t("Show all account names and emails") : t("Hide all account names and emails")}
-                title={(provider === "codex" ? allMasked : claudeMasked) ? t("Show all account names and emails") : t("Hide all account names and emails")}
+                aria-label={(provider === "codex" ? allMasked : provider === "claude" ? claudeMasked : cursorMasked) ? t("Show all account names and emails") : t("Hide all account names and emails")}
+                title={(provider === "codex" ? allMasked : provider === "claude" ? claudeMasked : cursorMasked) ? t("Show all account names and emails") : t("Hide all account names and emails")}
               >
-                {(provider === "codex" ? allMasked : claudeMasked) ? (
+                {(provider === "codex" ? allMasked : provider === "claude" ? claudeMasked : cursorMasked) ? (
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path
                       strokeLinecap="round"
@@ -1604,8 +1611,8 @@ function App() {
                 )}
               </button>
               <button
-                onClick={() => provider === "codex" ? void handleRefresh() : runClaude("refresh")}
-                disabled={providerBusy || (provider === "claude" && !claudeToolbar.ready)}
+                onClick={() => provider === "codex" ? void handleRefresh() : provider === "claude" ? runClaude("refresh") : runCursor("refresh")}
+                disabled={providerBusy || (provider !== "codex" && !otherProviderReady)}
                 className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100 text-gray-700 transition-colors hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 shrink-0"
                 aria-label={t("Refresh all usage")}
                 title={providerBusy ? t("Refreshing all usage") : t("Refresh all usage")}
@@ -1614,14 +1621,14 @@ function App() {
               </button>
               <button
                 onClick={() => provider === "codex" ? void handleWarmupAll() : runClaude("warmup")}
-                disabled={providerBusy || (provider === "codex" ? accounts.length === 0 : !claudeToolbar.ready || !claudeAccountCount)}
+                disabled={providerBusy || provider === "cursor" || (provider === "codex" ? accounts.length === 0 : !claudeToolbar.ready || !claudeAccountCount)}
                 className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors disabled:opacity-50 shrink-0 ${
                   providerBusy
                     ? "bg-amber-100 text-amber-500 dark:bg-amber-900/30 dark:text-amber-300"
                     : "bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/40"
                 }`}
-                aria-label={t("Warm up all accounts")}
-                title={providerBusy ? t("Warming up all accounts") : t("Warm up all accounts")}
+                aria-label={provider === "cursor" ? t("Warm-up is unavailable for Cursor Desktop") : t("Warm up all accounts")}
+                title={provider === "cursor" ? t("Warm-up is unavailable for Cursor Desktop") : providerBusy ? t("Warming up all accounts") : t("Warm up all accounts")}
               >
                 <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m13 3-8 11h6l-1 7 9-12h-6l1-6Z" strokeLinejoin="round"/></svg>
               </button>
@@ -1787,11 +1794,11 @@ function App() {
                     <button
                       onClick={() => {
                         setIsActionsMenuOpen(false);
-                        if (provider === "codex") setIsAddModalOpen(true); else runClaude("add");
+                        if (provider === "codex") setIsAddModalOpen(true); else if (provider === "claude") runClaude("add"); else runCursor("add");
                       }}
                       className="w-full rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-gray-100 dark:text-white dark:hover:bg-neutral-900"
                     > {t("+ Add Account")} </button>
-                    {provider === "claude" && <button disabled={!claudeToolbar.ready || claudeToolbar.busy} className="w-full rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-gray-100 dark:text-white dark:hover:bg-neutral-900" onClick={() => { setIsActionsMenuOpen(false); runClaude("import"); }}>{t("Import current account")}</button>}
+                    {provider !== "codex" && <button disabled={!otherProviderReady || providerBusy} className="w-full rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-gray-100 dark:text-white dark:hover:bg-neutral-900" onClick={() => { setIsActionsMenuOpen(false); if (provider === "claude") runClaude("import"); else runCursor("import"); }}>{t("Import current account")}</button>}
                     {provider === "codex" && <>
                     <button
                       onClick={() => {
@@ -1844,14 +1851,16 @@ function App() {
         <nav aria-label={t("Accounts")} className="provider-nav mb-5 flex gap-1 border-b border-gray-200 dark:border-gray-800">
           <button type="button" aria-pressed={provider === "codex"} onClick={() => setProvider("codex")} className="provider-tab px-4 py-2.5 text-sm font-semibold">Codex <span className="ml-1 text-xs tabular-nums">{accounts.length}</span></button>
           <button type="button" aria-pressed={provider === "claude"} onClick={() => setProvider("claude")} className="provider-tab px-4 py-2.5 text-sm font-semibold">Claude <span className="ml-1 text-xs tabular-nums">{claudeAccountCount ?? "…"}</span></button>
+          <button type="button" aria-pressed={provider === "cursor"} onClick={() => setProvider("cursor")} className="provider-tab px-4 py-2.5 text-sm font-semibold">Grok / Cursor <span className="ml-1 text-xs tabular-nums">{cursorAccountCount ?? "…"}</span></button>
         </nav>
-          <label className="provider-auto-warmup" title={t("Warm-up sends a minimal request when an unused usage window resets.")}><input type="checkbox" aria-label={t("Auto Warm Up")} checked={providerAutoWarmup} disabled={provider === "codex" ? accounts.length === 0 : !claudeToolbar.ready || claudeToolbar.busy} onChange={() => provider === "codex" ? setAutoWarmupAllEnabled(value => !value) : runClaude("auto-warmup")} />{t("Auto Warm Up")}{provider === "codex" && autoWarmupRunningIds.size > 0 && <span role="status">{t("Auto warming...")}</span>}{provider === "codex" && !autoWarmupAllEnabled && autoWarmupAccountIds.size > 0 && <span className="text-xs">{t("Auto: on")}</span>}</label>
+          <label className="provider-auto-warmup" title={provider === "cursor" ? t("Warm-up is unavailable for Cursor Desktop") : t("Warm-up sends a minimal request when an unused usage window resets.")}><input type="checkbox" aria-label={t("Auto Warm Up")} checked={providerAutoWarmup} disabled={provider === "codex" ? accounts.length === 0 : provider === "cursor" || !claudeToolbar.ready || claudeToolbar.busy} onChange={() => provider === "codex" ? setAutoWarmupAllEnabled(value => !value) : runClaude("auto-warmup")} />{t("Auto Warm Up")}{provider === "codex" && autoWarmupRunningIds.size > 0 && <span role="status">{t("Auto warming...")}</span>}{provider === "codex" && !autoWarmupAllEnabled && autoWarmupAccountIds.size > 0 && <span className="text-xs">{t("Auto: on")}</span>}</label>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="max-w-5xl mx-auto px-6 pt-4 pb-8">
         {provider === "codex" && quotaWaiting && <p role="status" className="mb-4 rounded-lg border border-amber-500 p-3 text-sm text-amber-900 dark:text-amber-200">{localizeMessage(quotaWaiting)}</p>}
+        <div hidden={provider !== "cursor"}><CursorAccounts ref={cursorAccountsRef} onAccountCountChange={setCursorAccountCount} onToolbarChange={setCursorToolbar} masked={cursorMasked} /></div>
         <div hidden={provider !== "claude"}><ClaudeAccounts ref={claudeAccountsRef} onAccountCountChange={setClaudeAccountCount} onToolbarChange={setClaudeToolbar} masked={claudeMasked} /></div>
         <div hidden={provider !== "codex"}>
         {loading && accounts.length === 0 ? (
