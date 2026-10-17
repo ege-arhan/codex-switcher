@@ -92,6 +92,8 @@ export const claudeTranslations: Record<string, string> = {
   "Open and sign in to Claude Desktop once before switching its profile": "Profil geçişinden önce Claude Desktop’ı açıp bir kez giriş yap",
   "Close Claude Desktop before switching accounts": "Hesap değiştirmeden önce Claude Desktop’ı kapat",
   "Claude Desktop could not close; no account data was changed": "Claude Desktop kapatılamadı; hesap verileri değiştirilmedi",
+  "Could not open Claude Desktop": "Claude Desktop açılamadı",
+  "The desktop profile switched successfully; open Claude manually": "Desktop profili değiştirildi; Claude’u elle aç",
   "The outgoing Claude backup already exists; no data was overwritten": "Geçerli Claude profilinin yedeği zaten var; hiçbir verinin üzerine yazılmadı",
   "Claude usage checks are temporarily rate limited (HTTP 429). Automatic retry is pending; signing in again is not required.": "Claude kullanım sorguları geçici olarak sınırlandı (HTTP 429). Otomatik yeniden deneme bekleniyor; yeniden giriş yapman gerekmiyor.",
   "Claude usage check failed (HTTP {status})": "Claude kullanımı kontrol edilemedi (HTTP {status})",

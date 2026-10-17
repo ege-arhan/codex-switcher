@@ -1458,13 +1458,59 @@ fn desktop_running() -> Result<bool> {
     if String::from_utf8_lossy(&native.stdout).trim() == "true" {
         return Ok(true);
     }
-    let output = Command::new("ps").args(["-axo", "command="]).output()?;
+    // `comm` is the executable path without arguments, so command lines that merely
+    // mention Claude.app cannot match.
+    let output = Command::new("ps").args(["-axo", "comm="]).output()?;
     if !output.status.success() {
         bail!("Could not verify that Claude Desktop has stopped");
     }
     Ok(String::from_utf8_lossy(&output.stdout)
         .lines()
-        .any(|line| line.contains("/Claude.app/Contents/")))
+        .any(|line| writes_desktop_profile(line.trim())))
+}
+
+/// The GUI and its Electron helpers (renderer, GPU, utility) write the profile.
+/// Bundled tools such as chrome-native-host (owned by a browser), crashpad and
+/// the embedded Claude Code CLI outlive the app and never hold the profile.
+fn writes_desktop_profile(executable: &str) -> bool {
+    let Some((bundle, rest)) = executable.rsplit_once("/Claude.app/Contents/") else {
+        return false;
+    };
+    if !bundle.starts_with('/') && !bundle.is_empty() {
+        return false;
+    }
+    if rest == "MacOS/Claude" {
+        return true;
+    }
+    rest.strip_prefix("Frameworks/")
+        .and_then(|helper| helper.split_once(".app/Contents/MacOS/"))
+        .is_some_and(|(app, binary)| app == binary && binary.starts_with("Claude Helper"))
+}
+
+fn launch_desktop() -> Result<()> {
+    if !Command::new("open")
+        .args(["-a", "Claude"])
+        .status()?
+        .success()
+    {
+        bail!("Could not open Claude Desktop");
+    }
+    Ok(())
+}
+
+/// After Claude was quit, a failed switch reopens it only when the live profile is
+/// intact and no transaction journal is pending; the original error always wins.
+fn reopen_after_failure<T>(
+    result: Result<T>,
+    quit: bool,
+    live: &Path,
+    journal: &Path,
+    launch: impl FnOnce() -> Result<()>,
+) -> Result<T> {
+    if result.is_err() && quit && live.is_dir() && !journal.exists() {
+        let _ = launch();
+    }
+    result
 }
 
 fn recover_desktop_transaction(
@@ -1526,14 +1572,15 @@ pub async fn switch_claude_desktop(profile_id: String) -> Result<ClaudeProfiles,
         let journal = root()?.join("desktop-transaction.json");
         if store.active_desktop_id.as_deref() == Some(&profile_id) && !journal.exists() {
             identify_live_desktop(&mut store, &live)?;
-            Command::new("open").args(["-a", "Claude"]).status()?;
+            launch_desktop()?;
             return Ok(store);
         }
         if !journal.exists() {
             identify_live_desktop(&mut store, &live)?;
         }
         // Quit through the app so it can flush Cookies/LevelDB; never force-kill it.
-        if desktop_running()?
+        let quit = desktop_running()?;
+        if quit
             && !Command::new("osascript")
                 .args(["-e", "tell application \"Claude\" to quit"])
                 .status()?
@@ -1541,68 +1588,74 @@ pub async fn switch_claude_desktop(profile_id: String) -> Result<ClaudeProfiles,
         {
             bail!("Claude Desktop could not close; no account data was changed");
         }
-        let deadline = Instant::now() + Duration::from_secs(15);
-        while desktop_running()? {
-            if Instant::now() >= deadline {
-                bail!("Close Claude Desktop before switching accounts");
-            }
-            std::thread::sleep(Duration::from_millis(200));
-        }
-        private_dir(&backups)?;
-        recover_desktop_transaction(&mut store, &live, &backups, &journal)?;
-        identify_live_desktop(&mut store, &live)?;
-        let from_id = store
-            .active_desktop_id
-            .clone()
-            .context("Import the current Claude account before switching Desktop")?;
-        uuid::Uuid::parse_str(&from_id)?;
-        if from_id == profile_id {
-            Command::new("open").args(["-a", "Claude"]).status()?;
-            return Ok(store);
-        }
-        if !live.is_dir() {
-            bail!("Open and sign in to Claude Desktop once before switching its profile");
-        }
-        let to = backups.join(&profile_id);
-        if !to.exists() {
-            private_dir(&to)?;
-            let config = live.join("claude_desktop_config.json");
-            if config.is_file() {
-                fs::copy(config, to.join("claude_desktop_config.json"))?;
-            }
-        }
-        write_json(
-            &journal,
-            &DesktopTransaction {
-                from: from_id.clone(),
-                to: profile_id.clone(),
-            },
-        )?;
-        if let Err(e) = swap_directories(&live, &backups.join(&from_id), &to) {
-            if live.exists() {
-                let _ = fs::remove_file(&journal);
-            }
-            return Err(e);
-        }
-        store.active_desktop_id = Some(profile_id);
-        if let Err(e) = save(&store) {
-            swap_directories(&live, &to, &backups.join(&from_id))?;
-            fs::remove_file(&journal)?;
-            return Err(e);
-        }
-        fs::remove_file(&journal)?;
-        if !Command::new("open")
-            .args(["-a", "Claude"])
-            .status()?
-            .success()
-        {
-            bail!("The desktop profile switched successfully; open Claude manually");
-        }
+        let result = switch_closed_desktop(&mut store, &profile_id, &live, &backups, &journal);
+        reopen_after_failure(result, quit, &live, &journal, launch_desktop)?;
+        launch_desktop()
+            .context("The desktop profile switched successfully; open Claude manually")?;
         Ok(store)
     })
     .await
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())
+}
+
+fn switch_closed_desktop(
+    store: &mut ClaudeProfiles,
+    profile_id: &str,
+    live: &Path,
+    backups: &Path,
+    journal: &Path,
+) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while desktop_running()? {
+        if Instant::now() >= deadline {
+            bail!("Close Claude Desktop before switching accounts");
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    private_dir(backups)?;
+    recover_desktop_transaction(store, live, backups, journal)?;
+    identify_live_desktop(store, live)?;
+    let from_id = store
+        .active_desktop_id
+        .clone()
+        .context("Import the current Claude account before switching Desktop")?;
+    uuid::Uuid::parse_str(&from_id)?;
+    if from_id == profile_id {
+        return Ok(());
+    }
+    if !live.is_dir() {
+        bail!("Open and sign in to Claude Desktop once before switching its profile");
+    }
+    let to = backups.join(profile_id);
+    if !to.exists() {
+        private_dir(&to)?;
+        let config = live.join("claude_desktop_config.json");
+        if config.is_file() {
+            fs::copy(config, to.join("claude_desktop_config.json"))?;
+        }
+    }
+    write_json(
+        journal,
+        &DesktopTransaction {
+            from: from_id.clone(),
+            to: profile_id.to_string(),
+        },
+    )?;
+    if let Err(e) = swap_directories(live, &backups.join(&from_id), &to) {
+        if live.exists() {
+            let _ = fs::remove_file(journal);
+        }
+        return Err(e);
+    }
+    store.active_desktop_id = Some(profile_id.to_string());
+    if let Err(e) = save(store) {
+        swap_directories(live, &to, &backups.join(&from_id))?;
+        fs::remove_file(journal)?;
+        return Err(e);
+    }
+    fs::remove_file(journal)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1859,6 +1912,69 @@ mod tests {
         assert_eq!(
             fs::read_to_string(live.join("session")).unwrap(),
             "account-a"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn desktop_stop_wait_ignores_tools_that_outlive_the_app() {
+        for (path, blocks) in [
+            ("/Applications/Claude.app/Contents/MacOS/Claude", true),
+            ("/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper", true),
+            ("/Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)", true),
+            ("/Applications/Claude.app/Contents/Frameworks/Claude Helper (GPU).app/Contents/MacOS/Claude Helper (GPU)", true),
+            ("/Users/me/Applications/Claude.app/Contents/MacOS/Claude", true),
+            ("/Applications/Claude.app/Contents/Helpers/chrome-native-host", false),
+            ("/Applications/Claude.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler", false),
+            ("/Applications/Claude.app/Contents/Resources/claude-code/claude", false),
+            ("/Applications/Cursor.app/Contents/MacOS/Cursor", false),
+            ("/Applications/NotClaude.app/Contents/MacOS/Claude", false),
+            ("/Applications/Claude.app/Contents/MacOS/Claude Helper", false),
+            ("/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/other", false),
+            ("/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper/x", false),
+            ("/tmp/x /Applications/Claude.app/Contents/MacOS/Claude", true),
+            ("node /Applications/Claude.app/Contents/MacOS/Claude", false),
+            ("", false),
+        ] {
+            assert_eq!(writes_desktop_profile(path), blocks, "{path}");
+        }
+    }
+
+    #[test]
+    fn failed_desktop_switch_reopens_only_an_intact_profile() {
+        let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let live = root.join("live");
+        let journal = root.join("desktop-transaction.json");
+        fs::create_dir_all(&live).unwrap();
+        let run = |result: Result<()>, quit: bool| {
+            let mut opened = false;
+            let error = reopen_after_failure(result, quit, &live, &journal, || {
+                opened = true;
+                bail!("launch failed")
+            })
+            .err()
+            .map(|e| e.to_string());
+            (opened, error)
+        };
+        assert_eq!(
+            run(Err(anyhow::anyhow!("original")), true),
+            (true, Some("original".into()))
+        );
+        assert_eq!(run(Ok(()), true), (false, None));
+        assert_eq!(
+            run(Err(anyhow::anyhow!("original")), false),
+            (false, Some("original".into()))
+        );
+        fs::write(&journal, "{}").unwrap();
+        assert_eq!(
+            run(Err(anyhow::anyhow!("original")), true),
+            (false, Some("original".into()))
+        );
+        fs::remove_file(&journal).unwrap();
+        fs::remove_dir(&live).unwrap();
+        assert_eq!(
+            run(Err(anyhow::anyhow!("original")), true),
+            (false, Some("original".into()))
         );
         fs::remove_dir_all(root).unwrap();
     }
