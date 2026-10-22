@@ -668,6 +668,13 @@ function App() {
       const stop = await listen<{ message: string; event_type: string }>(
         "session-recovery-event",
         (event) => {
+          if (
+            event.payload.event_type === "quota_waiting" ||
+            event.payload.event_type === "recovery_failed"
+          ) {
+            showWarmupToast(event.payload.message, true);
+            return;
+          }
           // Only show notification and reload account state when an actual switch occurred
           if (
             event.payload.event_type === "account_switched" ||

@@ -64,6 +64,15 @@ pub fn run() {
                             let message = format!("{error:#}");
                             if last_recovery_error.as_deref() != Some(&message) {
                                 eprintln!("[AutoRecovery] {message}");
+                                let _ = app_handle.emit(
+                                    "session-recovery-event",
+                                    commands::auto_recovery::RecoveryEventNotification {
+                                        event_type: "recovery_failed".into(),
+                                        session_id: String::new(),
+                                        message: message.clone(),
+                                        timestamp: chrono::Utc::now(),
+                                    },
+                                );
                                 if let Some(home) = dirs::home_dir() {
                                     let path = home.join(".codex-switcher/auto-recovery.log");
                                     let mut options = std::fs::OpenOptions::new();
