@@ -92,6 +92,36 @@ struct SessionTrackerState {
     last_account_switch: Option<(Instant, DateTime<Utc>, String, bool, String)>,
     failed_recoveries: HashMap<String, (String, Instant)>,
     pending_launches: HashMap<String, (ActiveCodexSession, String, Instant)>,
+    /// Desktop continuation after a committed account swap when IPC discovery or delivery failed.
+    pending_desktop_continuations: HashMap<String, PendingDesktopContinuation>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingDesktopContinuationPhase {
+    /// No follower turn write was attempted; owner discovery may be retried.
+    OwnerDiscovery,
+    /// A follower turn write was sent but acknowledgement was not confirmed; never resend.
+    TurnWriteUnconfirmed,
+}
+
+#[derive(Debug, Clone)]
+struct PendingDesktopContinuation {
+    session: ActiveCodexSession,
+    account_id: String,
+    phrase: String,
+    turn_key: String,
+    last_attempt: Instant,
+    phase: PendingDesktopContinuationPhase,
+    deeplink_hydrated: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct DesktopThreadHydrator {
+    deeplink_hydrated: bool,
+}
+
+fn pending_desktop_continuation_retryable(phase: PendingDesktopContinuationPhase) -> bool {
+    phase == PendingDesktopContinuationPhase::OwnerDiscovery
 }
 
 static RECOVERY_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -105,6 +135,7 @@ static TRACKER: std::sync::LazyLock<Mutex<SessionTrackerState>> = std::sync::Laz
         last_account_switch: None,
         failed_recoveries: HashMap::new(),
         pending_launches: HashMap::new(),
+        pending_desktop_continuations: HashMap::new(),
     })
 });
 
@@ -1032,6 +1063,94 @@ pub fn extract_session_model_and_effort(rollout_path: &Path) -> (Option<String>,
     (found_model, found_effort)
 }
 
+fn enqueue_pending_desktop_continuation(
+    session: &ActiveCodexSession,
+    account_id: &str,
+    phrase: &str,
+    phase: PendingDesktopContinuationPhase,
+    deeplink_hydrated: bool,
+) {
+    let Ok(mut tracker) = TRACKER.lock() else {
+        return;
+    };
+    let turn_key = session
+        .last_error
+        .as_ref()
+        .and_then(|e| e.turn_id.clone())
+        .unwrap_or_else(|| "default".to_string());
+    tracker.pending_desktop_continuations.insert(
+        session.session_id.clone(),
+        PendingDesktopContinuation {
+            session: session.clone(),
+            account_id: account_id.to_string(),
+            phrase: phrase.to_string(),
+            turn_key,
+            last_attempt: Instant::now(),
+            phase,
+            deeplink_hydrated,
+        },
+    );
+}
+
+fn desktop_owner_discovery_is_no_client(error: &anyhow::Error) -> bool {
+    let message = error.to_string().to_ascii_lowercase();
+    message.contains("no-client-found")
+        || message.contains("no client found")
+        || message.contains("no thread owner")
+}
+
+fn is_explicit_ipc_rejection(error: &anyhow::Error) -> bool {
+    error.to_string().contains("Desktop IPC request rejected")
+}
+
+pub fn codex_thread_deeplink_uri(session_id: &str) -> Option<String> {
+    if uuid::Uuid::parse_str(session_id).is_err() {
+        return None;
+    }
+    Some(format!("codex://threads/{}", session_id))
+}
+
+#[cfg(target_os = "macos")]
+fn open_codex_thread_deeplink(uri: &str) -> Result<()> {
+    let status = Command::new("open").args(["-g", uri]).status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("Could not open Codex thread deeplink");
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn open_codex_thread_deeplink(uri: &str) -> Result<()> {
+    let status = Command::new("xdg-open").arg(uri).status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("Could not open Codex thread deeplink");
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+impl DesktopThreadHydrator {
+    fn try_hydrate_thread(&mut self, session_id: &str) -> Result<()> {
+        if self.deeplink_hydrated {
+            return Ok(());
+        }
+        let uri = codex_thread_deeplink_uri(session_id)
+            .context("Thread id is not a valid UUID for codex://threads hydration")?;
+        open_codex_thread_deeplink(&uri)?;
+        self.deeplink_hydrated = true;
+        Ok(())
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[derive(Debug)]
+enum DesktopFollowerTurnStartError {
+    Unconfirmed,
+    Rejected(anyhow::Error),
+}
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 async fn desktop_ipc_request<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     stream: &mut S,
@@ -1150,7 +1269,7 @@ async fn desktop_ipc_start<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unp
     owner: &str,
     session: &str,
     phrase: &str,
-) -> Result<()> {
+) -> Result<(), DesktopFollowerTurnStartError> {
     let mut request = desktop_ipc_envelope(
         client,
         "thread-follower-start-turn",
@@ -1160,8 +1279,188 @@ async fn desktop_ipc_start<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unp
             "context":{"inheritThreadSettings":true}}}),
     );
     request["targetClientId"] = serde_json::json!(owner);
-    desktop_ipc_request(stream, request).await?;
-    Ok(())
+    desktop_ipc_deliver_turn(stream, request).await
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+async fn desktop_ipc_deliver_turn<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+    stream: &mut S,
+    request: serde_json::Value,
+) -> Result<(), DesktopFollowerTurnStartError> {
+    use tokio::io::AsyncReadExt;
+    let id = request["requestId"]
+        .as_str()
+        .ok_or(DesktopFollowerTurnStartError::Unconfirmed)?;
+    let data =
+        serde_json::to_vec(&request).map_err(|_| DesktopFollowerTurnStartError::Unconfirmed)?;
+    const MAX_FRAME: usize = 16 * 1024 * 1024;
+    if data.len() > MAX_FRAME {
+        return Err(DesktopFollowerTurnStartError::Unconfirmed);
+    }
+    let mut write_attempted = false;
+    let delivery = tokio::time::timeout(Duration::from_secs(15), async {
+        write_attempted = true;
+        stream.write_all(&(data.len() as u32).to_le_bytes()).await?;
+        stream.write_all(&data).await?;
+        stream.flush().await?;
+        loop {
+            let size = stream.read_u32_le().await? as usize;
+            anyhow::ensure!(
+                size > 0 && size <= MAX_FRAME,
+                "Invalid Desktop IPC frame size"
+            );
+            let mut bytes = vec![0; size];
+            stream.read_exact(&mut bytes).await?;
+            let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+            if value["type"] != "response" || value["requestId"].as_str() != Some(id) {
+                continue;
+            }
+            if value["resultType"] != "success" {
+                anyhow::bail!("Desktop IPC request rejected: {}", value["error"]);
+            }
+            return Ok(());
+        }
+    })
+    .await;
+    match delivery {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => {
+            if is_explicit_ipc_rejection(&error) {
+                Err(DesktopFollowerTurnStartError::Rejected(error))
+            } else if write_attempted {
+                Err(DesktopFollowerTurnStartError::Unconfirmed)
+            } else {
+                Err(DesktopFollowerTurnStartError::Rejected(error))
+            }
+        }
+        Err(_) => {
+            if write_attempted {
+                Err(DesktopFollowerTurnStartError::Unconfirmed)
+            } else {
+                Err(DesktopFollowerTurnStartError::Rejected(anyhow::anyhow!(
+                    "Desktop follower turn timed out before write"
+                )))
+            }
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+async fn discover_desktop_ipc_owner(
+    session_id: &str,
+    hydrator: &mut DesktopThreadHydrator,
+) -> Result<(tokio::net::UnixStream, String, String)> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
+    while tokio::time::Instant::now() < deadline {
+        match desktop_ipc_owner(session_id).await {
+            Ok(owner) => return Ok(owner),
+            Err(error) if desktop_owner_discovery_is_no_client(&error) => {
+                hydrator.try_hydrate_thread(session_id)?;
+                tokio::time::sleep(Duration::from_millis(750)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    anyhow::bail!("Desktop owner discovery timed out")
+}
+
+fn desktop_continuation_goal_blocked(session_id: &str) -> bool {
+    goal_blocks_auto_recovery(lookup_session_goal(session_id))
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+async fn resume_desktop_session_continuation(
+    session: &ActiveCodexSession,
+    account_id: &str,
+    phrase: &str,
+) -> Result<()> {
+    if load_accounts()?.active_account_id.as_deref() != Some(account_id) {
+        anyhow::bail!("Active account changed; skipping desktop continuation");
+    }
+    if desktop_continuation_goal_blocked(&session.session_id) {
+        anyhow::bail!("Goal is stopped or goal store is unreadable; skipping desktop continuation");
+    }
+    let turn_key = recovery_turn_key(session);
+    if let Ok(tracker) = TRACKER.lock() {
+        if let Some(pending) = tracker
+            .pending_desktop_continuations
+            .get(&session.session_id)
+        {
+            if pending.phase == PendingDesktopContinuationPhase::TurnWriteUnconfirmed
+                && pending.turn_key == turn_key
+            {
+                anyhow::bail!("Desktop follower turn is unconfirmed for this turn; not retrying");
+            }
+        }
+    }
+    let mut hydrator = TRACKER
+        .lock()
+        .ok()
+        .and_then(|tracker| {
+            tracker
+                .pending_desktop_continuations
+                .get(&session.session_id)
+                .map(|pending| DesktopThreadHydrator {
+                    deeplink_hydrated: pending.deeplink_hydrated,
+                })
+        })
+        .unwrap_or_default();
+    let owner = discover_desktop_ipc_owner(&session.session_id, &mut hydrator).await;
+    let (mut stream, client, owner_id) = match owner {
+        Ok(parts) => parts,
+        Err(error) => {
+            enqueue_pending_desktop_continuation(
+                session,
+                account_id,
+                phrase,
+                PendingDesktopContinuationPhase::OwnerDiscovery,
+                hydrator.deeplink_hydrated,
+            );
+            return Err(error);
+        }
+    };
+    if load_accounts()?.active_account_id.as_deref() != Some(account_id) {
+        anyhow::bail!("Active account changed after owner discovery");
+    }
+    if desktop_continuation_goal_blocked(&session.session_id) {
+        if let Ok(mut tracker) = TRACKER.lock() {
+            tracker
+                .pending_desktop_continuations
+                .remove(&session.session_id);
+        }
+        anyhow::bail!("Goal was stopped while waiting for desktop owner");
+    }
+    match desktop_ipc_start(&mut stream, &client, &owner_id, &session.session_id, phrase).await {
+        Ok(()) => {
+            if let Ok(mut tracker) = TRACKER.lock() {
+                tracker
+                    .pending_desktop_continuations
+                    .remove(&session.session_id);
+                tracker
+                    .handled_usage_limits
+                    .insert(session.session_id.clone(), turn_key);
+            }
+            Ok(())
+        }
+        Err(DesktopFollowerTurnStartError::Unconfirmed) => {
+            if let Ok(mut tracker) = TRACKER.lock() {
+                tracker
+                    .handled_usage_limits
+                    .insert(session.session_id.clone(), turn_key);
+            }
+            enqueue_pending_desktop_continuation(
+                session,
+                account_id,
+                phrase,
+                PendingDesktopContinuationPhase::TurnWriteUnconfirmed,
+                hydrator.deeplink_hydrated,
+            );
+            Err(anyhow::anyhow!(
+                "Desktop follower turn delivery is unconfirmed"
+            ))
+        }
+        Err(DesktopFollowerTurnStartError::Rejected(error)) => Err(error),
+    }
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -1170,41 +1469,29 @@ async fn resume_desktop_after_handoff(
     sessions: &[ActiveCodexSession],
     settings: &AppSettings,
 ) -> Result<Vec<String>> {
+    for session in sessions {
+        activate_session_goal_while_desktop_closed(&session.session_id);
+    }
     crate::commands::reopen_closed_codex_desktop(token)
         .await
         .map_err(anyhow::Error::msg)?;
+    let account_id = load_accounts()?
+        .active_account_id
+        .clone()
+        .unwrap_or_default();
     let mut started = Vec::new();
     let mut failures = Vec::new();
     for session in sessions {
-        // Discover only before delivery. Retrying an ambiguous turn acknowledgement duplicates messages.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
-        let owner = loop {
-            match desktop_ipc_owner(&session.session_id).await {
-                Ok(owner) => break Ok(owner),
-                Err(error) if tokio::time::Instant::now() < deadline => {
-                    let _ = error;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-                Err(error) => break Err(error),
-            }
+        let Some(phrase) =
+            resolve_desktop_owner_continue_phrase(&session.session_id, &settings.continue_phrase)
+        else {
+            eprintln!(
+                "[AutoRecovery] Skipping desktop continuation for {}: goal status is not auto-continuable",
+                session.session_id
+            );
+            continue;
         };
-        let phrase = resolve_session_resume_phrase(&session.session_id, &settings.continue_phrase);
-        let result = match owner {
-            Ok((mut stream, client, owner)) => {
-                if let Ok(mut tracker) = TRACKER.lock() {
-                    tracker.handled_usage_limits.insert(
-                        session.session_id.clone(),
-                        session
-                            .last_error
-                            .as_ref()
-                            .and_then(|e| e.turn_id.clone())
-                            .unwrap_or_else(|| "default".into()),
-                    );
-                }
-                desktop_ipc_start(&mut stream, &client, &owner, &session.session_id, &phrase).await
-            }
-            Err(error) => Err(error),
-        };
+        let result = resume_desktop_session_continuation(session, &account_id, &phrase).await;
         match result {
             Ok(()) => started.push(session.session_id.clone()),
             Err(error) => failures.push(format!("{}: {error}", session.session_id)),
@@ -1220,11 +1507,22 @@ async fn resume_desktop_after_handoff(
             failures.join("; ")
         );
     }
-    anyhow::ensure!(
-        !started.is_empty(),
-        "Codex Desktop could not confirm continuation: {}",
-        failures.join("; ")
-    );
+    if started.is_empty() {
+        let has_discovery_pending = TRACKER.lock().ok().is_some_and(|tracker| {
+            sessions.iter().any(|session| {
+                tracker
+                    .pending_desktop_continuations
+                    .get(&session.session_id)
+                    .is_some_and(|pending| pending_desktop_continuation_retryable(pending.phase))
+            })
+        });
+        if !has_discovery_pending {
+            anyhow::bail!(
+                "Codex Desktop could not confirm continuation: {}",
+                failures.join("; ")
+            );
+        }
+    }
     Ok(started)
 }
 
@@ -1659,8 +1957,6 @@ pub fn calculate_account_score(
     score
 }
 
-/// True only when a successful usage snapshot shows a full window and no banked reset can refill it.
-/// Missing or failed snapshots (offline, transient 403) stay eligible so RoundRobin can still fall back.
 fn usage_confirmed_exhausted(
     usage: Option<&UsageInfo>,
     resets: Option<&AccountResetCredits>,
@@ -1742,20 +2038,65 @@ pub fn select_best_account(
     scored.first().map(|(acc, _)| (*acc).clone())
 }
 
-/// Check if a Codex session has an active, paused, or usage-limited goal in ~/.codex/goals_*.sqlite.
-/// Unfinished goal statuses are: "active", "paused", "usage_limited", "blocked", "budget_limited".
-pub fn is_session_goal_active(session_id: &str) -> bool {
-    let Some(home) = dirs::home_dir() else {
-        return false;
-    };
-    let codex_dir = home.join(".codex");
-    let primary_db = codex_dir.join("goals_1.sqlite");
+/// Native `thread_goals.status` values in ~/.codex/goals_*.sqlite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionGoalStatus {
+    Active,
+    UsageLimited,
+    Paused,
+    Blocked,
+    BudgetLimited,
+    Complete,
+}
 
-    if primary_db.exists() && is_session_goal_active_in_db(&primary_db, session_id) {
-        return true;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GoalRowLookup {
+    Absent,
+    Present(SessionGoalStatus),
+    UnknownStatus(String),
+    DbUnavailable,
+}
+
+fn parse_session_goal_status(raw: &str) -> Option<SessionGoalStatus> {
+    match raw {
+        "active" => Some(SessionGoalStatus::Active),
+        "usage_limited" => Some(SessionGoalStatus::UsageLimited),
+        "paused" => Some(SessionGoalStatus::Paused),
+        "blocked" => Some(SessionGoalStatus::Blocked),
+        "budget_limited" => Some(SessionGoalStatus::BudgetLimited),
+        "complete" => Some(SessionGoalStatus::Complete),
+        _ => None,
     }
+}
 
-    // Check any other goals_*.sqlite in ~/.codex/ in case of future schema version bumps
+pub fn lookup_session_goal_in_db(db_path: &Path, session_id: &str) -> GoalRowLookup {
+    let conn = match rusqlite::Connection::open_with_flags(
+        db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        Ok(c) => c,
+        Err(_) => return GoalRowLookup::DbUnavailable,
+    };
+    let query = "SELECT status FROM thread_goals WHERE thread_id = ?1";
+    let status: Result<String, rusqlite::Error> =
+        conn.query_row(query, rusqlite::params![session_id], |row| row.get(0));
+    match status {
+        Ok(raw) => parse_session_goal_status(&raw)
+            .map(GoalRowLookup::Present)
+            .unwrap_or(GoalRowLookup::UnknownStatus(raw)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => GoalRowLookup::Absent,
+        Err(_) => GoalRowLookup::DbUnavailable,
+    }
+}
+
+pub fn lookup_session_goal(session_id: &str) -> GoalRowLookup {
+    let codex_dir = match get_codex_home() {
+        Ok(dir) => dir,
+        Err(_) => return GoalRowLookup::DbUnavailable,
+    };
+    let primary_db = codex_dir.join("goals_1.sqlite");
+    let mut unavailable = false;
+    let mut paths = vec![primary_db.clone()];
     if let Ok(entries) = fs::read_dir(&codex_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -1764,44 +2105,104 @@ pub fn is_session_goal_active(session_id: &str) -> bool {
                     && file_name.ends_with(".sqlite")
                     && path != primary_db
                 {
-                    if is_session_goal_active_in_db(&path, session_id) {
-                        return true;
-                    }
+                    paths.push(path);
                 }
             }
         }
     }
+    for path in paths {
+        if !path.exists() {
+            continue;
+        }
+        match lookup_session_goal_in_db(&path, session_id) {
+            GoalRowLookup::Present(status) => return GoalRowLookup::Present(status),
+            GoalRowLookup::UnknownStatus(raw) => return GoalRowLookup::UnknownStatus(raw),
+            GoalRowLookup::DbUnavailable => unavailable = true,
+            GoalRowLookup::Absent => {}
+        }
+    }
+    if unavailable {
+        GoalRowLookup::DbUnavailable
+    } else {
+        GoalRowLookup::Absent
+    }
+}
 
+pub fn goal_blocks_auto_recovery(lookup: GoalRowLookup) -> bool {
+    match lookup {
+        GoalRowLookup::Present(
+            SessionGoalStatus::Paused
+            | SessionGoalStatus::Blocked
+            | SessionGoalStatus::BudgetLimited
+            | SessionGoalStatus::Complete,
+        )
+        | GoalRowLookup::UnknownStatus(_)
+        | GoalRowLookup::DbUnavailable => true,
+        GoalRowLookup::Absent
+        | GoalRowLookup::Present(SessionGoalStatus::Active | SessionGoalStatus::UsageLimited) => {
+            false
+        }
+    }
+}
+
+pub fn is_session_goal_auto_continuable_in_db(db_path: &Path, session_id: &str) -> bool {
+    matches!(
+        lookup_session_goal_in_db(db_path, session_id),
+        GoalRowLookup::Present(SessionGoalStatus::Active)
+            | GoalRowLookup::Present(SessionGoalStatus::UsageLimited)
+    )
+}
+
+fn for_each_goals_db<F>(mut f: F) -> bool
+where
+    F: FnMut(&Path) -> bool,
+{
+    let codex_dir = match get_codex_home() {
+        Ok(dir) => dir,
+        Err(_) => return false,
+    };
+    let primary_db = codex_dir.join("goals_1.sqlite");
+    if primary_db.exists() && f(&primary_db) {
+        return true;
+    }
+    if let Ok(entries) = fs::read_dir(&codex_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                if file_name.starts_with("goals_")
+                    && file_name.ends_with(".sqlite")
+                    && path != primary_db
+                    && f(&path)
+                {
+                    return true;
+                }
+            }
+        }
+    }
     false
 }
 
-/// Helper to query SQLite db for active goal status
+/// True when automatic recovery may continue a goal (active or quota-paused usage_limited only).
+pub fn is_session_goal_auto_continuable(session_id: &str) -> bool {
+    for_each_goals_db(|db| is_session_goal_auto_continuable_in_db(db, session_id))
+}
+
+/// Back-compat alias: "active goal" for recovery means auto-continuable, not user-paused/blocked.
+pub fn is_session_goal_active(session_id: &str) -> bool {
+    is_session_goal_auto_continuable(session_id)
+}
+
 pub fn is_session_goal_active_in_db(db_path: &Path, session_id: &str) -> bool {
-    let conn = match rusqlite::Connection::open_with_flags(
-        db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-
-    let query = "SELECT status FROM thread_goals WHERE thread_id = ?1";
-    let status: Result<String, _> =
-        conn.query_row(query, rusqlite::params![session_id], |row| row.get(0));
-
-    match status {
-        Ok(s) => s != "complete",
-        Err(_) => false,
-    }
+    is_session_goal_auto_continuable_in_db(db_path, session_id)
 }
 
 /// Reset goal status in goals SQLite database to 'active' so Codex CLI immediately
 /// continues autonomous execution upon resume.
 pub fn activate_session_goal(session_id: &str) -> bool {
-    let Some(home) = dirs::home_dir() else {
-        return false;
+    let codex_dir = match get_codex_home() {
+        Ok(dir) => dir,
+        Err(_) => return false,
     };
-    let codex_dir = home.join(".codex");
     let primary_db = codex_dir.join("goals_1.sqlite");
 
     let mut updated = false;
@@ -1835,7 +2236,7 @@ pub fn activate_session_goal_in_db(db_path: &Path, session_id: &str) -> bool {
     };
 
     let now_ms = chrono::Utc::now().timestamp_millis();
-    let query = "UPDATE thread_goals SET status = 'active', updated_at_ms = ?1 WHERE thread_id = ?2 AND status IN ('usage_limited', 'paused')";
+    let query = "UPDATE thread_goals SET status = 'active', updated_at_ms = ?1 WHERE thread_id = ?2 AND status = 'usage_limited' AND (token_budget IS NULL OR tokens_used < token_budget)";
     match conn.execute(query, rusqlite::params![now_ms, session_id]) {
         Ok(rows) => rows > 0,
         Err(_) => false,
@@ -1843,10 +2244,10 @@ pub fn activate_session_goal_in_db(db_path: &Path, session_id: &str) -> bool {
 }
 
 /// Resolve the resume phrase for a session:
-/// If the session has an active/unfinished goal, returns "/goal resume".
+/// If the session has an auto-continuable goal, returns "/goal resume".
 /// Otherwise, returns the user-configured continue phrase (defaulting to "continue" if blank).
 pub fn resolve_session_resume_phrase(session_id: &str, user_continue_phrase: &str) -> String {
-    if !session_id.is_empty() && is_session_goal_active(session_id) {
+    if !session_id.is_empty() && is_session_goal_auto_continuable(session_id) {
         "/goal resume".to_string()
     } else {
         let trimmed = user_continue_phrase.trim();
@@ -1855,6 +2256,45 @@ pub fn resolve_session_resume_phrase(session_id: &str, user_continue_phrase: &st
         } else {
             trimmed.to_string()
         }
+    }
+}
+
+fn plain_continue_phrase(user_continue_phrase: &str) -> String {
+    let trimmed = user_continue_phrase.trim();
+    if trimmed.is_empty() {
+        "continue".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Desktop owner follower turns use normal continue text, never slash-goal commands.
+pub fn resolve_desktop_owner_continue_phrase(
+    session_id: &str,
+    user_continue_phrase: &str,
+) -> Option<String> {
+    if session_id.is_empty() {
+        return None;
+    }
+    match lookup_session_goal(session_id) {
+        GoalRowLookup::Absent
+        | GoalRowLookup::Present(SessionGoalStatus::Active)
+        | GoalRowLookup::Present(SessionGoalStatus::UsageLimited) => {
+            Some(plain_continue_phrase(user_continue_phrase))
+        }
+        GoalRowLookup::Present(_)
+        | GoalRowLookup::UnknownStatus(_)
+        | GoalRowLookup::DbUnavailable => None,
+    }
+}
+
+/// Promote usage_limited goals in SQLite only while Codex Desktop is fully closed.
+pub fn activate_session_goal_while_desktop_closed(session_id: &str) {
+    if matches!(
+        lookup_session_goal(session_id),
+        GoalRowLookup::Present(SessionGoalStatus::UsageLimited)
+    ) {
+        activate_session_goal(session_id);
     }
 }
 
@@ -2399,6 +2839,59 @@ pub async fn check_and_recover_sessions() -> Result<Option<RecoveryEventNotifica
             }
         }
     }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        let pending_desktop = {
+            let mut tracker = TRACKER
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Tracker poisoned"))?;
+            tracker
+                .pending_desktop_continuations
+                .iter()
+                .filter(|(_, pending)| {
+                    pending_desktop_continuation_retryable(pending.phase)
+                        && pending.last_attempt.elapsed() >= Duration::from_secs(30)
+                })
+                .map(|(id, pending)| (id.clone(), pending.clone()))
+                .collect::<Vec<_>>()
+        };
+        let active_account = load_accounts()?.active_account_id;
+        for (session_id, pending) in pending_desktop {
+            if active_account.as_deref() != Some(pending.account_id.as_str()) {
+                continue;
+            }
+            if ensure_session_still_failed(&pending.session).is_err() {
+                TRACKER
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("Tracker poisoned"))?
+                    .pending_desktop_continuations
+                    .remove(&session_id);
+                continue;
+            }
+            if let Ok(mut tracker) = TRACKER.lock() {
+                if let Some(entry) = tracker.pending_desktop_continuations.get_mut(&session_id) {
+                    entry.last_attempt = Instant::now();
+                }
+            }
+            if resume_desktop_session_continuation(
+                &pending.session,
+                &pending.account_id,
+                &pending.phrase,
+            )
+            .await
+            .is_ok()
+            {
+                return Ok(Some(RecoveryEventNotification {
+                    event_type: "account_switched".into(),
+                    session_id,
+                    message: "Resumed desktop session after pending goal continuation retry".into(),
+                    timestamp: Utc::now(),
+                }));
+            }
+        }
+    }
+
     let sessions = tokio::task::spawn_blocking(find_active_sessions).await??;
 
     for session in sessions {
@@ -2412,6 +2905,9 @@ pub async fn check_and_recover_sessions() -> Result<Option<RecoveryEventNotifica
         let Some(error) = &session.last_error else {
             continue;
         };
+        if goal_blocks_auto_recovery(lookup_session_goal(&session.session_id)) {
+            continue;
+        }
         let turn_key = recovery_turn_key(&session);
         if TRACKER
             .lock()
@@ -2517,6 +3013,9 @@ pub async fn check_and_recover_sessions() -> Result<Option<RecoveryEventNotifica
             }
             SessionErrorKind::UsageLimitExceeded => {
                 if !settings.auto_switch_limit_enabled {
+                    continue;
+                }
+                if goal_blocks_auto_recovery(lookup_session_goal(&session.session_id)) {
                     continue;
                 }
 
@@ -2676,11 +3175,15 @@ fn ensure_session_still_failed(session: &ActiveCodexSession) -> Result<()> {
 }
 
 async fn resume_cli_session(session: &ActiveCodexSession, settings: &AppSettings) -> Result<()> {
+    anyhow::ensure!(
+        !goal_blocks_auto_recovery(lookup_session_goal(&session.session_id)),
+        "Goal was stopped; refusing automatic CLI continuation"
+    );
     let phrase = resolve_session_resume_phrase(&session.session_id, &settings.continue_phrase);
     relaunch_cli_session(
         session,
         &phrase,
-        is_session_goal_active(&session.session_id),
+        is_session_goal_auto_continuable(&session.session_id),
         settings,
     )
     .await?;
@@ -2692,6 +3195,13 @@ async fn handle_account_switch_for_session(
     session: &ActiveCodexSession,
     settings: &AppSettings,
 ) -> Result<Option<RecoveryEventNotification>> {
+    if goal_blocks_auto_recovery(lookup_session_goal(&session.session_id)) {
+        eprintln!(
+            "[AutoRecovery] Skipping account recovery for {}: goal is stopped or unreadable",
+            session.session_id
+        );
+        return Ok(None);
+    }
     let store = load_accounts()?;
     let current_id = store.active_account_id.as_deref();
 
@@ -2723,15 +3233,21 @@ async fn handle_account_switch_for_session(
 
             let phrase =
                 resolve_session_resume_phrase(&session.session_id, &settings.continue_phrase);
-            let is_goal = is_session_goal_active(&session.session_id);
+            let is_goal = is_session_goal_auto_continuable(&session.session_id);
 
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             let consumed = if session.is_desktop {
-                if is_goal {
-                    activate_session_goal(&session.session_id);
-                } else {
-                    send_codex_queue_resume(&session.session_id, &phrase).await?;
-                }
+                let account_id = load_accounts()?
+                    .active_account_id
+                    .clone()
+                    .unwrap_or_default();
+                let Some(desktop_phrase) = resolve_desktop_owner_continue_phrase(
+                    &session.session_id,
+                    &settings.continue_phrase,
+                ) else {
+                    return Ok(None);
+                };
+                resume_desktop_session_continuation(session, &account_id, &desktop_phrase).await?;
                 false
             } else {
                 relaunch_cli_session(session, &phrase, is_goal, settings).await?
@@ -2844,7 +3360,8 @@ async fn handle_account_switch_for_session(
                                         &session.session_id,
                                         &settings.continue_phrase,
                                     );
-                                    let is_goal = is_session_goal_active(&session.session_id);
+                                    let is_goal =
+                                        is_session_goal_auto_continuable(&session.session_id);
 
                                     #[cfg(any(target_os = "macos", target_os = "linux"))]
                                     let consumed = if session.is_desktop {
@@ -3177,7 +3694,7 @@ async fn handle_account_switch_for_session(
         }
     }
 
-    let is_goal = is_session_goal_active(&session.session_id);
+    let is_goal = is_session_goal_auto_continuable(&session.session_id);
     let consumed = relaunch_cli_session(session, &phrase, is_goal, settings).await?;
     if let Ok(mut tracker) = TRACKER.lock() {
         tracker.pending_launches.remove(&session.session_id);
@@ -3405,7 +3922,7 @@ mod tests {
                     request
                         .pointer("/params/turnStart/request/input/0/text")
                         .unwrap(),
-                    "/goal resume"
+                    "continue"
                 );
                 if acknowledge {
                     let response = serde_json::to_vec(&serde_json::json!({"type":"response", "requestId":request["requestId"], "resultType":"success", "result":{"result":{}}})).unwrap();
@@ -3427,7 +3944,7 @@ mod tests {
                 "switcher",
                 "desktop-owner",
                 "thread",
-                "/goal resume",
+                "continue",
             )
             .await;
             assert_eq!(result.is_ok(), acknowledge);
@@ -3456,7 +3973,7 @@ mod tests {
         let exhausted = make_test_account("exhausted", "Exhausted", None);
         let offline = make_test_account("offline", "Offline", None);
         let forbidden = make_test_account("forbidden", "Forbidden", None);
-        let accounts = [exhausted.clone(), offline, forbidden];
+        let accounts = [exhausted.clone(), offline, forbidden.clone()];
         let mut usage_map = HashMap::new();
         usage_map.insert(exhausted.id.clone(), usage(Some(10.0), Some(100.0), None));
         // Transient 403: snapshot exists but carries an error; offline: no snapshot at all.
@@ -4953,7 +5470,7 @@ mod tests {
     }
 
     #[test]
-    fn test_goal_resume_phrase_detection_in_db() {
+    fn test_goal_auto_continuable_status_eligibility() {
         let temp_dir = std::env::temp_dir().join(format!("test_goal_db_{}", uuid::Uuid::new_v4()));
         let _ = fs::create_dir_all(&temp_dir);
         let db_path = temp_dir.join("goals_1.sqlite");
@@ -4976,28 +5493,108 @@ mod tests {
                 ('thread_paused', 'g2', 'obj2', 'paused'),
                 ('thread_usage_limited', 'g3', 'obj3', 'usage_limited'),
                 ('thread_blocked', 'g4', 'obj4', 'blocked'),
+                ('thread_budget_limited', 'g6', 'obj6', 'budget_limited'),
                 ('thread_complete', 'g5', 'obj5', 'complete');",
             [],
         )
         .unwrap();
         drop(conn);
 
-        // Active/paused/usage_limited/blocked goals must evaluate to true
-        assert!(is_session_goal_active_in_db(&db_path, "thread_active"));
-        assert!(is_session_goal_active_in_db(&db_path, "thread_paused"));
-        assert!(is_session_goal_active_in_db(
+        assert!(is_session_goal_auto_continuable_in_db(
+            &db_path,
+            "thread_active"
+        ));
+        assert!(is_session_goal_auto_continuable_in_db(
             &db_path,
             "thread_usage_limited"
         ));
-        assert!(is_session_goal_active_in_db(&db_path, "thread_blocked"));
-
-        // Completed goal or non-existent thread must evaluate to false
-        assert!(!is_session_goal_active_in_db(&db_path, "thread_complete"));
-        assert!(!is_session_goal_active_in_db(
+        assert!(!is_session_goal_auto_continuable_in_db(
+            &db_path,
+            "thread_paused"
+        ));
+        assert!(!is_session_goal_auto_continuable_in_db(
+            &db_path,
+            "thread_blocked"
+        ));
+        assert!(!is_session_goal_auto_continuable_in_db(
+            &db_path,
+            "thread_budget_limited"
+        ));
+        assert!(!is_session_goal_auto_continuable_in_db(
+            &db_path,
+            "thread_complete"
+        ));
+        assert_eq!(
+            lookup_session_goal_in_db(&db_path, "thread_non_existent"),
+            GoalRowLookup::Absent
+        );
+        assert!(!is_session_goal_auto_continuable_in_db(
             &db_path,
             "thread_non_existent"
         ));
 
+        assert_eq!(
+            lookup_session_goal_in_db(&db_path, "thread_paused"),
+            GoalRowLookup::Present(SessionGoalStatus::Paused)
+        );
+        assert!(goal_blocks_auto_recovery(lookup_session_goal_in_db(
+            &db_path,
+            "thread_paused"
+        )));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_resolve_session_resume_phrase_respects_paused_goal() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_goal_phrase_{}", uuid::Uuid::new_v4()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let db_path = temp_dir.join("goals_1.sqlite");
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute(
+            "CREATE TABLE thread_goals (
+                thread_id TEXT PRIMARY KEY NOT NULL,
+                goal_id TEXT NOT NULL,
+                objective TEXT NOT NULL,
+                status TEXT NOT NULL
+            );",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO thread_goals (thread_id, goal_id, objective, status) VALUES
+                ('thread_paused', 'g2', 'obj2', 'paused');",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let home = dirs::home_dir().unwrap();
+        let codex_dir = home.join(".codex");
+        let backup = codex_dir.join(format!(
+            "goals_1.sqlite.switcher-test-backup-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let primary = codex_dir.join("goals_1.sqlite");
+        let had_primary = primary.exists();
+        if had_primary {
+            fs::copy(&primary, &backup).unwrap();
+        }
+        fs::create_dir_all(&codex_dir).unwrap();
+        fs::copy(&db_path, &primary).unwrap();
+
+        assert_eq!(
+            resolve_session_resume_phrase("thread_paused", "keep-going"),
+            "keep-going"
+        );
+
+        if had_primary {
+            fs::copy(&backup, &primary).unwrap();
+            fs::remove_file(&backup).unwrap();
+        } else {
+            let _ = fs::remove_file(&primary);
+        }
         let _ = fs::remove_dir_all(&temp_dir);
     }
 
@@ -5028,17 +5625,20 @@ mod tests {
                 goal_id TEXT NOT NULL,
                 objective TEXT NOT NULL,
                 status TEXT NOT NULL,
-                updated_at_ms INTEGER NOT NULL
+                updated_at_ms INTEGER NOT NULL,
+                token_budget INTEGER,
+                tokens_used INTEGER NOT NULL DEFAULT 0
             );",
             [],
         )
         .unwrap();
 
         conn.execute(
-            "INSERT INTO thread_goals (thread_id, goal_id, objective, status, updated_at_ms) VALUES
-                ('thread_paused', 'g2', 'obj2', 'paused', 100),
-                ('thread_usage_limited', 'g3', 'obj3', 'usage_limited', 200),
-                ('thread_complete', 'g5', 'obj5', 'complete', 300);",
+            "INSERT INTO thread_goals (thread_id, goal_id, objective, status, updated_at_ms, token_budget, tokens_used) VALUES
+                ('thread_paused', 'g2', 'obj2', 'paused', 100, NULL, 0),
+                ('thread_usage_limited', 'g3', 'obj3', 'usage_limited', 200, 5000, 10),
+                ('thread_budget_exhausted', 'g4', 'obj4', 'usage_limited', 250, 100, 100),
+                ('thread_complete', 'g5', 'obj5', 'complete', 300, NULL, 0);",
             [],
         )
         .unwrap();
@@ -5048,7 +5648,11 @@ mod tests {
             &db_path,
             "thread_usage_limited"
         ));
-        assert!(activate_session_goal_in_db(&db_path, "thread_paused"));
+        assert!(!activate_session_goal_in_db(&db_path, "thread_paused"));
+        assert!(!activate_session_goal_in_db(
+            &db_path,
+            "thread_budget_exhausted"
+        ));
         assert!(!activate_session_goal_in_db(&db_path, "thread_complete"));
         assert!(!activate_session_goal_in_db(&db_path, "non_existent"));
 
@@ -5075,10 +5679,153 @@ mod tests {
             )
             .unwrap();
         assert_eq!(status1, "active");
-        assert_eq!(status2, "active");
+        assert_eq!(status2, "paused");
+        let status_budget: String = conn
+            .query_row(
+                "SELECT status FROM thread_goals WHERE thread_id = 'thread_budget_exhausted'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status_budget, "usage_limited");
+        let objective: String = conn
+            .query_row(
+                "SELECT objective FROM thread_goals WHERE thread_id = 'thread_usage_limited'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(objective, "obj3");
         assert_eq!(status3, "complete");
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_goal_unknown_status_fails_closed() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_goal_unknown_{}", uuid::Uuid::new_v4()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let db_path = temp_dir.join("goals_1.sqlite");
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute(
+            "CREATE TABLE thread_goals (
+                thread_id TEXT PRIMARY KEY NOT NULL,
+                goal_id TEXT NOT NULL,
+                objective TEXT NOT NULL,
+                status TEXT NOT NULL
+            );",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO thread_goals (thread_id, goal_id, objective, status) VALUES
+                ('thread_weird', 'g1', 'obj1', 'mystery');",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let lookup = lookup_session_goal_in_db(&db_path, "thread_weird");
+        assert!(matches!(lookup, GoalRowLookup::UnknownStatus(_)));
+        assert!(goal_blocks_auto_recovery(lookup));
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_codex_thread_deeplink_uri_requires_uuid() {
+        assert!(codex_thread_deeplink_uri("not-a-uuid").is_none());
+        let id = uuid::Uuid::new_v4().to_string();
+        assert_eq!(
+            codex_thread_deeplink_uri(&id),
+            Some(format!("codex://threads/{}", id))
+        );
+    }
+
+    #[test]
+    fn test_pending_desktop_continuation_retry_phases() {
+        assert!(pending_desktop_continuation_retryable(
+            PendingDesktopContinuationPhase::OwnerDiscovery
+        ));
+        assert!(!pending_desktop_continuation_retryable(
+            PendingDesktopContinuationPhase::TurnWriteUnconfirmed
+        ));
+    }
+
+    #[test]
+    fn test_paused_goal_blocks_auto_recovery_before_switch() {
+        assert!(goal_blocks_auto_recovery(GoalRowLookup::Present(
+            SessionGoalStatus::Paused
+        )));
+        assert!(!goal_blocks_auto_recovery(GoalRowLookup::Absent));
+    }
+
+    #[test]
+    fn test_resolve_desktop_owner_continue_phrase_skips_user_paused_goals() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_desktop_phrase_{}", uuid::Uuid::new_v4()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let db_path = temp_dir.join("goals_1.sqlite");
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute(
+            "CREATE TABLE thread_goals (
+                thread_id TEXT PRIMARY KEY NOT NULL,
+                goal_id TEXT NOT NULL,
+                objective TEXT NOT NULL,
+                status TEXT NOT NULL
+            );",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO thread_goals (thread_id, goal_id, objective, status) VALUES
+                ('thread_paused', 'g2', 'obj2', 'paused'),
+                ('thread_active', 'g1', 'obj1', 'active');",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        assert_eq!(
+            lookup_session_goal_in_db(&db_path, "thread_paused"),
+            GoalRowLookup::Present(SessionGoalStatus::Paused)
+        );
+        assert!(is_session_goal_auto_continuable_in_db(
+            &db_path,
+            "thread_active"
+        ));
+        assert!(!is_session_goal_auto_continuable_in_db(
+            &db_path,
+            "thread_paused"
+        ));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test]
+    async fn desktop_follower_turn_eof_after_write_is_unconfirmed() {
+        use tokio::io::AsyncReadExt;
+        let (mut client, mut server) = tokio::io::duplex(8192);
+        let receiver = tokio::spawn(async move {
+            let size = server.read_u32_le().await.unwrap() as usize;
+            let mut bytes = vec![0; size];
+            server.read_exact(&mut bytes).await.unwrap();
+        });
+        let request = desktop_ipc_envelope(
+            "switcher",
+            "thread-follower-start-turn",
+            2,
+            serde_json::json!({"conversationId":"thread","turnStart":{
+                "request":{"threadId":"thread","input":[{"type":"text","text":"continue"}]},
+                "context":{"inheritThreadSettings":true}}}),
+        );
+        let result = desktop_ipc_deliver_turn(&mut client, request).await;
+        assert!(matches!(
+            result,
+            Err(DesktopFollowerTurnStartError::Unconfirmed)
+        ));
+        drop(client);
+        receiver.await.unwrap();
     }
 
     #[tokio::test]
