@@ -1275,7 +1275,7 @@ async fn desktop_ipc_start<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unp
         "thread-follower-start-turn",
         2,
         serde_json::json!({"conversationId":session, "turnStart":{
-            "request":{"threadId":session,"input":[{"type":"text","text":phrase}]},
+            "request":{"threadId":session,"input":[{"type":"text","text":phrase,"text_elements":[]}]},
             "context":{"inheritThreadSettings":true}}}),
     );
     request["targetClientId"] = serde_json::json!(owner);
@@ -3924,6 +3924,10 @@ mod tests {
                         .unwrap(),
                     "continue"
                 );
+                assert_eq!(
+                    request.pointer("/params/turnStart/request/input/0/text_elements"),
+                    Some(&serde_json::json!([]))
+                );
                 if acknowledge {
                     let response = serde_json::to_vec(&serde_json::json!({"type":"response", "requestId":request["requestId"], "resultType":"success", "result":{"result":{}}})).unwrap();
                     server
@@ -5816,7 +5820,7 @@ mod tests {
             "thread-follower-start-turn",
             2,
             serde_json::json!({"conversationId":"thread","turnStart":{
-                "request":{"threadId":"thread","input":[{"type":"text","text":"continue"}]},
+                "request":{"threadId":"thread","input":[{"type":"text","text":"continue","text_elements":[]}]},
                 "context":{"inheritThreadSettings":true}}}),
         );
         let result = desktop_ipc_deliver_turn(&mut client, request).await;
