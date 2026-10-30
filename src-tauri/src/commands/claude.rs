@@ -734,35 +734,50 @@ pub async fn start_claude_login(email: String) -> Result<ClaudeLogin, String> {
     result.map_err(|e| e.to_string())
 }
 
+fn resolve_login_profile(store: &mut ClaudeProfiles, email: &str) -> Result<(ClaudeProfile, bool)> {
+    if let Some(p) = store
+        .profiles
+        .iter()
+        .find(|p| p.email.eq_ignore_ascii_case(email))
+    {
+        return Ok((p.clone(), false));
+    }
+    let p = ClaudeProfile {
+        id: uuid::Uuid::new_v4().to_string(),
+        email: email.to_owned(),
+        is_default: false,
+        account_uuid: None,
+        desktop_status: String::new(),
+        logged_in: false,
+        plan_type: None,
+        last_warmup_at: None,
+        usage: None,
+        error: None,
+    };
+    store.profiles.push(p.clone());
+    Ok((p, true))
+}
+
+fn verify_login_matches_profile(status: &Value, p: &ClaudeProfile) -> Result<()> {
+    if status.get("loggedIn").and_then(Value::as_bool) != Some(true)
+        || status.get("authMethod").and_then(Value::as_str) != Some("claude.ai")
+        || !status
+            .get("email")
+            .and_then(Value::as_str)
+            .is_some_and(|e| e.eq_ignore_ascii_case(&p.email))
+    {
+        bail!("Signed-in account does not match the requested email");
+    }
+    Ok(())
+}
+
 async fn start_login_process(email: String) -> Result<ClaudeLogin> {
     let p = {
         let _lock = lock_store()?;
         let mut store = load()?;
-        let p = if let Some(p) = store
-            .profiles
-            .iter()
-            .find(|p| p.email.eq_ignore_ascii_case(&email))
-        {
-            p.clone()
-        } else {
-            let p = ClaudeProfile {
-                id: uuid::Uuid::new_v4().to_string(),
-                email,
-                is_default: false,
-                account_uuid: None,
-                desktop_status: String::new(),
-                logged_in: false,
-                plan_type: None,
-                last_warmup_at: None,
-                usage: None,
-                error: None,
-            };
-            store.profiles.push(p.clone());
+        let (p, created) = resolve_login_profile(&mut store, &email)?;
+        if created {
             save(&store)?;
-            p
-        };
-        if p.is_default {
-            bail!("The existing login is already imported; add a different account");
         }
         p
     };
@@ -816,14 +831,16 @@ async fn start_login_process(email: String) -> Result<ClaudeLogin> {
             }
             let verify = p.clone();
             let status = tokio::task::spawn_blocking(move || login_status(&verify)).await??;
-            if status.get("loggedIn").and_then(Value::as_bool) != Some(true)
-                || status.get("authMethod").and_then(Value::as_str) != Some("claude.ai")
-                || !status.get("email").and_then(Value::as_str).is_some_and(|e| e.eq_ignore_ascii_case(&p.email)) {
-                bail!("Signed-in account does not match the requested email");
-            }
+            let observed_uuid = code_account_uuid(&p);
+            verify_login_matches_profile(&status, &p)?;
             let _lock = lock_store()?;
             let mut store = load()?;
-            if let Some(p) = store.profiles.iter_mut().find(|a| a.id == p.id) { p.logged_in = true; p.plan_type = verified_plan(&status); p.error = None; p.account_uuid = code_account_uuid(p); }
+            if let Some(saved) = store.profiles.iter_mut().find(|a| a.id == p.id) {
+                saved.logged_in = true;
+                saved.plan_type = verified_plan(&status);
+                saved.error = None;
+                saved.account_uuid = observed_uuid.or_else(|| saved.account_uuid.clone());
+            }
             save(&store)?;
             Ok(())
         }.await;
@@ -1698,6 +1715,62 @@ mod tests {
             usage_retry_delay(Some("Wed, 21 Oct 2015 07:28:00 GMT"), 1445412420),
             60
         );
+    }
+
+    #[test]
+    fn existing_profiles_including_default_reuse_the_same_id_for_relogin() {
+        let mut store = ClaudeProfiles {
+            profiles: vec![ClaudeProfile {
+                id: "default-id".into(),
+                email: "owner@example.com".into(),
+                is_default: true,
+                account_uuid: Some("acct-1".into()),
+                desktop_status: String::new(),
+                logged_in: true,
+                plan_type: Some("pro".into()),
+                last_warmup_at: None,
+                usage: None,
+                error: None,
+            }],
+            ..Default::default()
+        };
+        let (again, created) = resolve_login_profile(&mut store, "owner@example.com").unwrap();
+        assert!(!created);
+        assert_eq!(again.id, "default-id");
+        assert!(again.is_default);
+        assert_eq!(store.profiles.len(), 1);
+        let (extra, created) = resolve_login_profile(&mut store, "other@example.com").unwrap();
+        assert!(created);
+        assert_ne!(extra.id, "default-id");
+        assert_eq!(store.profiles.len(), 2);
+    }
+
+    #[test]
+    fn login_verification_rejects_wrong_email_or_auth_method() {
+        let p = ClaudeProfile {
+            id: uuid::Uuid::new_v4().to_string(),
+            email: "owner@example.com".into(),
+            is_default: false,
+            account_uuid: Some("acct-1".into()),
+            desktop_status: String::new(),
+            logged_in: false,
+            plan_type: None,
+            last_warmup_at: None,
+            usage: None,
+            error: None,
+        };
+        let ok = json!({"loggedIn":true,"authMethod":"claude.ai","email":"owner@example.com"});
+        verify_login_matches_profile(&ok, &p).unwrap();
+        assert!(verify_login_matches_profile(
+            &json!({"loggedIn":true,"authMethod":"claude.ai","email":"other@example.com"}),
+            &p,
+        )
+        .is_err());
+        assert!(verify_login_matches_profile(
+            &json!({"loggedIn":true,"authMethod":"oauth","email":"owner@example.com"}),
+            &p,
+        )
+        .is_err());
     }
 
     #[test]

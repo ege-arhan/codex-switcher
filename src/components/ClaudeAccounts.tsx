@@ -58,6 +58,7 @@ export const ClaudeAccounts = forwardRef<ClaudeAccountsHandle, {
     const [email, setEmail] = useState("");
     const [login, setLogin] = useState<ClaudeLogin | null>(null);
     const [adding, setAdding] = useState(false);
+    const [reloginTarget, setReloginTarget] = useState<ClaudeProfile | null>(null);
     const [desktopTarget, setDesktopTarget] = useState<ClaudeProfile | null>(null);
     const [cwd, setCwd] = useState(() => localStorage.getItem("claude-project-directory") || "");
     const [copied, setCopied] = useState(false);
@@ -139,7 +140,7 @@ export const ClaudeAccounts = forwardRef<ClaudeAccountsHandle, {
         async run(command) {
             if (busy || !store) return;
             if (command === "add") {
-                setError(null); setEmail(""); setLogin(null); setAdding(true);
+                setError(null); setEmail(""); setLogin(null); setReloginTarget(null); setAdding(true);
             } else if (command === "warmup") {
                 setBusy(true); setError(null);
                 try {
@@ -216,6 +217,7 @@ export const ClaudeAccounts = forwardRef<ClaudeAccountsHandle, {
             await invokeBackend("cancel_claude_login").catch((e) => setError(String(e)));
         setLogin(null);
         setAdding(false);
+        setReloginTarget(null);
         setDesktopTarget(null);
         setCopied(false);
         setReturnInput("");
@@ -298,13 +300,13 @@ export const ClaudeAccounts = forwardRef<ClaudeAccountsHandle, {
             {p.last_warmup_at && <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{t("Last warm-up: {time}", { time: new Date(p.last_warmup_at * 1000).toLocaleString(locale) })}</p>}
               <div className="mt-3 flex flex-wrap gap-2">
                 <button className={button} disabled={busy || !p.logged_in} onClick={() => void action("warmup_claude_account", { profileId: p.id })}>{t("Warm up")}</button>
-              {!p.is_default && <button className={button} disabled={busy} onClick={() => { setError(null); setEmail(p.email); setLogin(null); setAdding(true); }}>{t("Code login link")}</button>}
+              <button className={button} disabled={busy} onClick={() => { setError(null); setEmail(p.email); setLogin(null); setReloginTarget(p); setAdding(true); }}>{p.logged_in ? t("Refresh Code sign-in") : t("Re-sign in to Code")}</button>
               </div>
             </details>
           </article></Fragment>))}
       </div>
       <dialog ref={dialog} aria-labelledby="claude-dialog-title" onCancel={(e) => { e.preventDefault(); void closeDialog(); }} className="m-auto w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-6 text-gray-900 shadow-xl backdrop:bg-black/50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">
-        <h3 id="claude-dialog-title" className="text-lg font-semibold">{desktopTarget ? t("Switch Claude Desktop account") : t("Add Claude account")}</h3>
+        <h3 id="claude-dialog-title" className="text-lg font-semibold">{desktopTarget ? t("Switch Claude Desktop account") : reloginTarget ? t("Re-sign in to Claude Code") : t("Add Claude account")}</h3>
         {desktopTarget ? <>
           <p className="mt-3 text-sm">{t("The Claude Desktop profile for {email} will open. Code login links do not sign into Desktop; on first use, sign in with this email in the Claude window. Once saved, the profile can be opened again.", { email: desktopTarget.email })}</p>
           <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">{t("Finish any active Desktop work before Claude closes and reopens.")}</p>
@@ -322,10 +324,11 @@ export const ClaudeAccounts = forwardRef<ClaudeAccountsHandle, {
         } }}>{t("Complete Desktop sign-in")}</button>
           </div>
         </> : <>
+          {reloginTarget && <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">{t("Generate a new Claude Code login link for {email}. The saved profile stays the same; sign-in must match this email.", { email: reloginTarget.email })}</p>}
           <form onSubmit={(e) => { e.preventDefault(); void startLogin(); }}>
             <label className="mt-4 block text-sm" htmlFor="claude-email">{t("Account email")}</label>
-            <input autoFocus id="claude-email" type="email" required value={email} disabled={busy || login?.status === "pending"} onChange={(e) => setEmail(e.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 dark:border-gray-600"/>
-            <button type="submit" className={`${button} mt-3`} disabled={busy || login?.status === "pending"}>{busy ? t("Preparing\u2026") : t("Generate login link")}</button>
+            <input autoFocus id="claude-email" type="email" required value={email} readOnly={!!reloginTarget} disabled={busy || login?.status === "pending" || !!reloginTarget} onChange={(e) => setEmail(e.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 dark:border-gray-600"/>
+            <button type="submit" className={`${button} mt-3`} disabled={busy || login?.status === "pending"}>{busy ? t("Preparing\u2026") : reloginTarget ? t("Generate re-login link") : t("Generate login link")}</button>
           </form>
           {login?.status === "pending" && <p role="status" className="mt-3 text-sm">{t("Waiting for Code sign-in to be saved on this Mac. Return here after the browser step; the account is confirmed only after the native login completes.")}</p>}
           {login?.auth_url && <div className="mt-3 space-y-2">
